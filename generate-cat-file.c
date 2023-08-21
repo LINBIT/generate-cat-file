@@ -69,25 +69,25 @@ size_t encode_integer(int i, bool write)
 		sign = 0x80;
 	}
 	if (i < 0x80) {
-		int_buf[1] = 3;	/* length */
+		int_buf[1] = 1;	/* length (without header) */
 		int_buf[2] = i | sign;
 		return append_to_buffer(3, int_buf, write);
 	}
 	if (i < 0x8000) {
-		int_buf[1] = 4;	/* length */
+		int_buf[1] = 2;	/* length */
 		int_buf[2] = (i >> 8) | sign;
 		int_buf[3] = i & 0xff;
 		return append_to_buffer(4, int_buf, write);
 	}
 	if (i < 0x800000) {
-		int_buf[1] = 4;	/* length */
+		int_buf[1] = 3;	/* length */
 		int_buf[2] = (i >> 16) | sign;
 		int_buf[3] = (i >> 8) & 0xff;
 		int_buf[4] = i & 0xff;
 		return append_to_buffer(5, int_buf, write);
 	}
 	if (i < 0x80000000) {
-		int_buf[1] = 5;	/* length */
+		int_buf[1] = 4;	/* length */
 		int_buf[2] = (i >> 24) | sign;
 		int_buf[3] = (i >> 16) & 0xff;
 		int_buf[4] = (i >> 8) & 0xff;
