@@ -153,6 +153,9 @@ int main(int argc, char ** argv)
 	size_t len;
 	/* initialize data structure */
 
+	s.x = 42;
+	s.y = 0x41424344;
+
 	/* compute lengths */
 	/* generate binary DER */
 	len = encode_sequence(&s, encode_pkcs7_toplevel, true);
