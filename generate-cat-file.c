@@ -5,9 +5,9 @@
 
 /* DER encoding */
 
-#define SEQUENCE_TAG 	0x30
-#define OID_TAG 	0x06
-#define NULL_TAG 	0x05
+#define SEQUENCE_TAG	0x30
+#define OID_TAG		0x06
+#define NULL_TAG	0x05
 #define INTEGER_TAG	0x02
 
 struct oid {
@@ -53,10 +53,10 @@ size_t append_to_buffer(size_t n, char *data)
 		fatal("buffer size too small, please recompile with bigger buffer.\n");
 	}
 
-	if (write)
+	if (write) {
 		memcpy(buffer+buflen, data, n);
-
-	buflen+=n;
+		buflen+=n;
+	}
 	return n;
 }
 
@@ -70,25 +70,25 @@ size_t encode_integer(int i)
 		sign = 0x80;
 	}
 	if (i < 0x80) {
-		int_buf[1] = 3;	/* length */ 		
+		int_buf[1] = 3;	/* length */
 		int_buf[2] = i | sign;
 		return append_to_buffer(3, int_buf);
 	}
 	if (i < 0x8000) {
-		int_buf[1] = 4;	/* length */ 		
+		int_buf[1] = 4;	/* length */
 		int_buf[2] = (i >> 8) | sign;
 		int_buf[3] = i & 0xff;
 		return append_to_buffer(4, int_buf);
 	}
 	if (i < 0x800000) {
-		int_buf[1] = 4;	/* length */ 		
+		int_buf[1] = 4;	/* length */
 		int_buf[2] = (i >> 16) | sign;
 		int_buf[3] = (i >> 8) & 0xff;
 		int_buf[4] = i & 0xff;
 		return append_to_buffer(5, int_buf);
 	}
 	if (i < 0x80000000) {
-		int_buf[1] = 5;	/* length */ 		
+		int_buf[1] = 5;	/* length */
 		int_buf[2] = (i >> 24) | sign;
 		int_buf[3] = (i >> 16) & 0xff;
 		int_buf[4] = (i >> 8) & 0xff;
@@ -129,24 +129,26 @@ size_t encode_tag_and_length(char tag, size_t length)
 	fatal("This length is not supported");
 }
 
-size_t encode_pkcs7_toplevel(struct pkcs7_toplevel *s)
+size_t encode_pkcs7_toplevel(void *p)
 {
+	struct pkcs7_toplevel *s = p;
 	size_t length = 0;
 
 	length += encode_integer(s->x);
 	length += encode_integer(s->y);
-	
+
 	return length;
 }
 
-size_t encode_sequence(struct pkcs7_toplevel *s)
+size_t encode_sequence(void *s, size_t a_fn(void*))
 {
-	size_t length = encode_pkcs7_toplevel(s);
-	size_t l2;
+	write = false;
+	size_t length = a_fn(s);
 
-	l2 = encode_tag_and_length(SEQUENCE_TAG, length);
-	
-	return encode_pkcs7_toplevel(s) + l2;
+	write = true;
+	size_t l2 = encode_tag_and_length(SEQUENCE_TAG, length);
+
+	return a_fn(s) + l2;
 }
 
 int main(int argc, char ** argv)
@@ -156,14 +158,11 @@ int main(int argc, char ** argv)
 	/* initialize data structure */
 
 	/* compute lengths */
-	len = encode_sequence(&s);
+	/* generate binary DER */
+	len = encode_sequence(&s, encode_pkcs7_toplevel);
 	if (len != buflen)
 		fatal("length mismatch\n");
 
-	buflen = 0;
-	write = true;
-	
-	/* generate binary DER */
-	encode_sequence(&s);
 		/* and write to stdout or so ... */
+	fwrite(buffer, buflen, 1, stdout);
 }
