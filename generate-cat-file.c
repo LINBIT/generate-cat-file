@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
+#include <sys/errno.h>
 
 /* DER encoding */
 
@@ -24,6 +25,7 @@ struct array_like_sequence {
 
 struct test {
 	int z;
+	char *oid;
 };
 
 struct pkcs7_toplevel {
@@ -102,6 +104,66 @@ size_t encode_integer(int i, bool write)
 	fatal("Can't encode this integer\n");
 }
 
+size_t encode_oid_component(int oc, bool write)
+{
+	char oid_buf[10];
+
+	if (oc < 0) {
+		fatal("OID component must not be negative.\n");
+	}
+	if (oc < 0x80) {
+		oid_buf[0] = oc;
+		return append_to_buffer(1, oid_buf, write);
+	}
+	if (oc < 0x4000) {
+		oid_buf[0] = ((oc >> 7) & 0x7f) | 0x80 ;
+		oid_buf[1] = oc & 0x7f;
+		return append_to_buffer(2, oid_buf, write);
+	}
+	if (oc < 0x200000) {
+		oid_buf[0] = ((oc >> 14) & 0x7f) | 0x80 ;
+		oid_buf[1] = ((oc >> 7) & 0x7f) | 0x80 ;
+		oid_buf[2] = oc & 0x7f;
+		return append_to_buffer(3, oid_buf, write);
+	}
+	fatal("Can't encode this OID component\n");
+}
+
+size_t encode_oid(char *oid, bool write)
+{
+	char *next;
+	size_t len;
+	int l0, l1, l;
+
+	l0 = strtoul(oid, &next, 10);
+	if (l0 == 0 && errno != 0) {
+		fatal("could not parse OID element\n");
+	}
+	if (*next != '.') {
+		fatal("Syntax error in OID\n");
+	}
+	l1 = strtoul(next+1, &next, 10);
+	if (l1 == 0 && errno != 0) {
+		fatal("could not parse OID element\n");
+	}
+	if (*next != '.' && *next != '\0') {
+		fatal("Syntax error in OID\n");
+	}
+	len = encode_oid_component(l0*40 + l1, write);
+
+	while (*next != '\0') {
+		l = strtoul(next+1, &next, 10);
+		if (l == 0 && errno != 0) {
+			fatal("could not parse OID element\n");
+		}
+		if (*next != '.' && *next != '\0') {
+			fatal("Syntax error in OID\n");
+		}
+		len += encode_oid_component(l, write);
+	}
+	return len;
+}
+
 size_t encode_null(bool write)
 {
 	char null_buf[2] = { NULL_TAG, 0x00 };
@@ -130,7 +192,15 @@ size_t encode_tag_and_length(char tag, size_t length, bool write)
 		tag_and_length[4] = length & 0xff;
 		return append_to_buffer(5, tag_and_length, write);
 	}
-	fatal("This length is not supported");
+	fatal("This length is not supported\n");
+}
+
+size_t encode_oid_with_header(char *oid, bool write)
+{
+	size_t len = encode_oid(oid, false);
+
+	size_t l2 = encode_tag_and_length(OID_TAG, len, write);
+	return encode_oid(oid, write) + l2;
 }
 
 size_t encode_sequence(void *s, size_t a_fn(void*, bool), bool write)
@@ -144,8 +214,12 @@ size_t encode_sequence(void *s, size_t a_fn(void*, bool), bool write)
 size_t encode_test(void *p, bool write)
 {
 	struct test *t = p;
+	size_t len;
 
-	return encode_integer(t->z, write);
+	len = encode_integer(t->z, write);
+	len += encode_oid_with_header(t->oid, write);
+
+	return len;
 }
 
 size_t encode_pkcs7_toplevel(void *p, bool write)
@@ -169,6 +243,8 @@ int main(int argc, char ** argv)
 	s.x = 42;
 	s.y = 0x41424344;
 	s.t.z = 128;
+	/* s.t.oid = "1.2.3.4.5.6.40000.2000000000"; */
+	s.t.oid = "1.2.840.113549.1.7.2";
 
 	/* compute lengths */
 	/* generate binary DER */
