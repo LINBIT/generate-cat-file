@@ -13,7 +13,7 @@
 
 struct oid {
 		/* the OID in human readable format */
-	char oid[40];
+	char *oid;
 };
 
 struct null {
@@ -23,25 +23,20 @@ struct array_like_sequence {
 	int nelem;
 };
 
-struct test {
-	int z;
-	char *oid;
+struct pkcs7_data {
+	int an_int;
+	/* empty set: using SHA-1 which is default */
+/*
+	struct algo {
+		struct oid algo_oid;
+		struct null a_null;
+	} algo;
+*/
 };
 
 struct pkcs7_toplevel {
-/*
-	struct oid signed_data;
-	struct a_sequence {
-		int an_int;
-		struct algo {
-			struct oid algo_oid;
-			struct null a_null;
-		} algo;
-	} sequence;
-*/
-	int x;
-	int y;
-	struct test t;
+	struct oid signed_data_oid;
+	struct pkcs7_data data;
 };
 
 size_t buflen;
@@ -195,12 +190,12 @@ size_t encode_tag_and_length(char tag, size_t length, bool write)
 	fatal("This length is not supported\n");
 }
 
-size_t encode_oid_with_header(char *oid, bool write)
+size_t encode_oid_with_header(struct oid *oid, bool write)
 {
-	size_t len = encode_oid(oid, false);
+	size_t len = encode_oid(oid->oid, false);
 
 	size_t l2 = encode_tag_and_length(OID_TAG, len, write);
-	return encode_oid(oid, write) + l2;
+	return encode_oid(oid->oid, write) + l2;
 }
 
 size_t encode_sequence(void *s, size_t a_fn(void*, bool), bool write)
@@ -211,15 +206,14 @@ size_t encode_sequence(void *s, size_t a_fn(void*, bool), bool write)
 	return a_fn(s, write) + l2;
 }
 
-size_t encode_test(void *p, bool write)
+size_t encode_pkcs7_data(void *p, bool write)
 {
-	struct test *t = p;
-	size_t len;
+	struct pkcs7_data *d = p;
+	size_t length = 0;
 
-	len = encode_integer(t->z, write);
-	len += encode_oid_with_header(t->oid, write);
+	length += encode_integer(d->an_int, write);
 
-	return len;
+	return length;
 }
 
 size_t encode_pkcs7_toplevel(void *p, bool write)
@@ -227,9 +221,8 @@ size_t encode_pkcs7_toplevel(void *p, bool write)
 	struct pkcs7_toplevel *s = p;
 	size_t length = 0;
 
-	length += encode_integer(s->x, write);
-	length += encode_integer(s->y, write);
-	length += encode_sequence(&s->t, encode_test, write);
+	length += encode_oid_with_header(&s->signed_data_oid, write);
+	length += encode_sequence(&s->data, encode_pkcs7_data, write);
 
 	return length;
 }
@@ -240,11 +233,9 @@ int main(int argc, char ** argv)
 	size_t len;
 	/* initialize data structure */
 
-	s.x = 42;
-	s.y = 0x41424344;
-	s.t.z = 128;
-	/* s.t.oid = "1.2.3.4.5.6.40000.2000000000"; */
-	s.t.oid = "1.2.840.113549.1.7.2";
+	s.signed_data_oid.oid = "1.2.840.113549.1.7.2";
+	s.data.an_int = 1;
+//	s.sequence.algo.algo_oid.oid = "2.16.840.1.101.3.4.2.1";
 
 	/* compute lengths */
 	/* generate binary DER */
