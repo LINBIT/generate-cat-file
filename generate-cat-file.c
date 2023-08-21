@@ -22,6 +22,10 @@ struct array_like_sequence {
 	int nelem;
 };
 
+struct test {
+	int z;
+};
+
 struct pkcs7_toplevel {
 /*
 	struct oid signed_data;
@@ -35,6 +39,7 @@ struct pkcs7_toplevel {
 */
 	int x;
 	int y;
+	struct test t;
 };
 
 size_t buflen;
@@ -128,6 +133,21 @@ size_t encode_tag_and_length(char tag, size_t length, bool write)
 	fatal("This length is not supported");
 }
 
+size_t encode_sequence(void *s, size_t a_fn(void*, bool), bool write)
+{
+	size_t length = a_fn(s, false);
+
+	size_t l2 = encode_tag_and_length(SEQUENCE_TAG, length, write);
+	return a_fn(s, write) + l2;
+}
+
+size_t encode_test(void *p, bool write)
+{
+	struct test *t = p;
+
+	return encode_integer(t->z, write);
+}
+
 size_t encode_pkcs7_toplevel(void *p, bool write)
 {
 	struct pkcs7_toplevel *s = p;
@@ -135,16 +155,9 @@ size_t encode_pkcs7_toplevel(void *p, bool write)
 
 	length += encode_integer(s->x, write);
 	length += encode_integer(s->y, write);
+	length += encode_sequence(&s->t, encode_test, write);
 
 	return length;
-}
-
-size_t encode_sequence(void *s, size_t a_fn(void*, bool), bool write)
-{
-	size_t length = a_fn(s, false);
-
-	size_t l2 = encode_tag_and_length(SEQUENCE_TAG, length, write);
-	return a_fn(s, write) + l2;
 }
 
 int main(int argc, char ** argv)
@@ -155,6 +168,7 @@ int main(int argc, char ** argv)
 
 	s.x = 42;
 	s.y = 0x41424344;
+	s.t.z = 128;
 
 	/* compute lengths */
 	/* generate binary DER */
