@@ -7,6 +7,8 @@
 /* DER encoding */
 
 #define SEQUENCE_TAG	0x30
+#define SET_TAG		0x31
+#define ARRAY_TAG	0xA0
 #define OID_TAG		0x06
 #define NULL_TAG	0x05
 #define INTEGER_TAG	0x02
@@ -23,15 +25,15 @@ struct array_like_sequence {
 	int nelem;
 };
 
+struct algo {
+	struct oid algo_oid;
+	struct null a_null;
+};
+
 struct pkcs7_data {
 	int an_int;
 	/* empty set: using SHA-1 which is default */
-/*
-	struct algo {
-		struct oid algo_oid;
-		struct null a_null;
-	} algo;
-*/
+	struct algo algo;
 };
 
 struct pkcs7_toplevel {
@@ -206,14 +208,53 @@ size_t encode_sequence(void *s, size_t a_fn(void*, bool), bool write)
 	return a_fn(s, write) + l2;
 }
 
+	/* TODO: differs only in tag value ... */
+size_t encode_set(void *s, size_t a_fn(void*, bool), bool write)
+{
+	size_t length = a_fn(s, false);
+
+	size_t l2 = encode_tag_and_length(SET_TAG, length, write);
+	return a_fn(s, write) + l2;
+}
+
+size_t encode_array(void *s, size_t a_fn(void*, bool), bool write)
+{
+	size_t length = a_fn(s, false);
+
+	size_t l2 = encode_tag_and_length(ARRAY_TAG, length, write);
+	return a_fn(s, write) + l2;
+}
+
+size_t encode_algo(void *p, bool write)
+{
+	struct algo *a = p;
+	size_t length = 0;
+
+	length += encode_oid_with_header(&a->algo_oid, write);
+	length += encode_null(write);
+
+	return length;
+}
+
+size_t encode_algo_sequence(void *p, bool write)
+{
+	return encode_sequence(p, encode_algo, write);
+}
+
 size_t encode_pkcs7_data(void *p, bool write)
 {
 	struct pkcs7_data *d = p;
 	size_t length = 0;
 
 	length += encode_integer(d->an_int, write);
+	length += encode_set(&d->algo, encode_algo_sequence, write);
 
 	return length;
+}
+
+size_t encode_pkcs7_sequence(void *p, bool write)
+{
+	return encode_sequence(p, encode_pkcs7_data, write);
 }
 
 size_t encode_pkcs7_toplevel(void *p, bool write)
@@ -222,7 +263,8 @@ size_t encode_pkcs7_toplevel(void *p, bool write)
 	size_t length = 0;
 
 	length += encode_oid_with_header(&s->signed_data_oid, write);
-	length += encode_sequence(&s->data, encode_pkcs7_data, write);
+	// length += encode_sequence(&s->data, encode_pkcs7_array, write);
+	length += encode_array(&s->data, encode_pkcs7_sequence, write);
 
 	return length;
 }
@@ -235,7 +277,7 @@ int main(int argc, char ** argv)
 
 	s.signed_data_oid.oid = "1.2.840.113549.1.7.2";
 	s.data.an_int = 1;
-//	s.sequence.algo.algo_oid.oid = "2.16.840.1.101.3.4.2.1";
+	s.data.algo.algo_oid.oid = "2.16.840.1.101.3.4.2.1";
 
 	/* compute lengths */
 	/* generate binary DER */
