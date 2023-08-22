@@ -41,11 +41,23 @@ struct algo {
 	struct null a_null;
 };
 
+struct a_file {
+	char *a_hash;
+	char *filename;
+	char *guid;	/* {C689AAB8-8E78-11D0-8C47-00C04FC295EE} */
+
+	struct oid name_value_oid;
+	struct oid member_info_oid;
+};
+
 struct catalog_list_element {
 	struct oid catalog_list_oid;
 	struct octet_string a_hash;
 	struct utc_time a_time;
 	struct oid catalog_list_member_oid;
+
+	int nr_files;
+	struct a_file files[2];
 };
 
 struct cert_trust_list {
@@ -229,6 +241,26 @@ size_t encode_utc_time(struct utc_time *t, bool write)
 	return append_to_buffer(len, t->date_time, write) + l2;
 }
 
+size_t encode_string_as_utf16(const char *s, bool write)
+{
+	unsigned short utf16[1000];
+	int i;
+	struct octet_string os;
+
+	for (i=0;s[i]!='\0' && i<sizeof(utf16)/sizeof(utf16[0]);i++) {
+		utf16[i]=(unsigned char)(s[i]);
+	}
+	if (s[i] != '\0')
+		fatal("string too long\n");
+	utf16[i] = 0;
+	i++;
+
+	os.len = i*sizeof(utf16[0]);
+	os.data = utf16;
+
+	return encode_octet_string(&os, write);
+}
+
 size_t encode_oid_with_header(struct oid *oid, bool write)
 {
 	size_t len = encode_oid(oid->oid, false);
@@ -262,6 +294,7 @@ size_t encode_array(void *s, size_t a_fn(void*, bool), bool write)
 	return a_fn(s, write) + l2;
 }
 
+
 size_t encode_algo(void *p, bool write)
 {
 	struct algo *a = p;
@@ -276,6 +309,30 @@ size_t encode_algo(void *p, bool write)
 size_t encode_algo_sequence(void *p, bool write)
 {
 	return encode_sequence(p, encode_algo, write);
+}
+
+size_t encode_one_file(void *p, bool write)
+{
+	struct a_file *f = p;
+	size_t length;
+
+	length = encode_string_as_utf16(f->a_hash, write);
+//	length = encode_set(f, encode_file_attributes, write);
+
+	return length;
+}
+
+size_t encode_files(void *p, bool write)
+{
+	struct catalog_list_element *e = p;
+	size_t length = 0;
+	int i;
+
+	for (i=0;i<e->nr_files;i++) {
+		length += encode_sequence(&e->files[i], encode_one_file, write);
+	}
+
+	return length;
 }
 
 size_t encode_catalog_list_member_oid(void *p, bool write)
@@ -305,6 +362,7 @@ size_t encode_catalog_list_elements(void *p, bool write)
 	length += encode_octet_string(&e->a_hash, write);
 	length += encode_utc_time(&e->a_time, write);
 	length += encode_sequence(p, encode_catalog_list_member_oid, write);
+	length += encode_sequence(p, encode_files, write);
 
 	return length;
 }
@@ -371,6 +429,10 @@ int main(int argc, char ** argv)
 	s.data.cert_trust_list.catalog_list_element.a_hash.data = a_hash;
 	s.data.cert_trust_list.catalog_list_element.a_time.date_time = "221020135745Z";
 	s.data.cert_trust_list.catalog_list_element.catalog_list_member_oid.oid = "1.3.6.1.4.1.311.12.1.2";
+
+	s.data.cert_trust_list.catalog_list_element.nr_files = 2;
+	s.data.cert_trust_list.catalog_list_element.files[0].a_hash = "02CD96EE27BE43EBD9FFA363979235779DFCA";
+	s.data.cert_trust_list.catalog_list_element.files[1].a_hash = "6CED62E97D6C2F4F92D43B72DCAAC53B347C4";
 
 	/* compute lengths */
 	/* generate binary DER */
