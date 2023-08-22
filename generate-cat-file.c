@@ -43,7 +43,7 @@ struct algo {
 
 struct a_file {
 	char *a_hash;
-	char *filename;
+	char *file_name;
 	char *guid;	/* {C689AAB8-8E78-11D0-8C47-00C04FC295EE} */
 
 	struct oid name_value_oid;
@@ -311,13 +311,54 @@ size_t encode_algo_sequence(void *p, bool write)
 	return encode_sequence(p, encode_algo, write);
 }
 
+size_t encode_file_name(void *p, bool write)
+{
+	struct a_file *f = p;
+	size_t length;
+
+	length = encode_string_as_utf16("File", write);
+	length += encode_integer(268500993, write);
+	length += encode_string_as_utf16(f->file_name, write);
+
+	return length;
+}
+
+size_t encode_file_name_sequence(void *p, bool write)
+{
+	return encode_sequence(p, encode_file_name, write);
+}
+
+size_t encode_name_value_objid(void *p, bool write)
+{
+	struct a_file *f = p;
+	size_t length;
+
+	length = encode_oid_with_header(&f->name_value_oid, write);
+	length += encode_set(f, encode_file_name_sequence, write);
+
+	return length;
+}
+
+size_t encode_file_attributes(void *p, bool write)
+{
+	struct a_file *f = p;
+	size_t length;
+
+	length = encode_sequence(f, encode_name_value_objid, write);
+/*	length += encode_sequence(f, encode_name_value_objid, write);
+	length += encode_sequence(f, encode_name_value_objid, write);
+	length += encode_sequence(f, encode_name_value_objid, write);
+*/
+	return length;
+}
+
 size_t encode_one_file(void *p, bool write)
 {
 	struct a_file *f = p;
 	size_t length;
 
 	length = encode_string_as_utf16(f->a_hash, write);
-//	length = encode_set(f, encode_file_attributes, write);
+	length += encode_set(f, encode_file_attributes, write);
 
 	return length;
 }
@@ -432,7 +473,12 @@ int main(int argc, char ** argv)
 
 	s.data.cert_trust_list.catalog_list_element.nr_files = 2;
 	s.data.cert_trust_list.catalog_list_element.files[0].a_hash = "02CD96EE27BE43EBD9FFA363979235779DFCA";
+	s.data.cert_trust_list.catalog_list_element.files[0].file_name = "windrbd.sys";
+	s.data.cert_trust_list.catalog_list_element.files[0].name_value_oid.oid = "1.3.6.1.4.1.311.12.2.1";
+
 	s.data.cert_trust_list.catalog_list_element.files[1].a_hash = "6CED62E97D6C2F4F92D43B72DCAAC53B347C4";
+	s.data.cert_trust_list.catalog_list_element.files[1].file_name = "windrbd.inf";
+	s.data.cert_trust_list.catalog_list_element.files[1].name_value_oid.oid = "1.3.6.1.4.1.311.12.2.1";
 
 	/* compute lengths */
 	/* generate binary DER */
