@@ -221,6 +221,12 @@ size_t encode_null(bool write)
 	return append_to_buffer(sizeof(null_buf), null_buf, write);
 }
 
+size_t encode_empty_set(bool write)
+{
+	char empty_set_buf[2] = { SET_TAG, 0x00 };
+	return append_to_buffer(sizeof(empty_set_buf), empty_set_buf, write);
+}
+
 size_t encode_tag_and_length(char tag, size_t length, bool write)
 {
 	char tag_and_length[10];
@@ -624,8 +630,10 @@ size_t encode_pkcs7_data(void *p, bool write)
 	size_t length = 0;
 
 	length += encode_integer(d->an_int, write);
-	length += encode_set(&d->algo, encode_algo_sequence, write);
+	// length += encode_set(&d->algo, encode_algo_sequence, write);
+	length += encode_empty_set(write);
 	length += encode_sequence(&d->cert_trust_list, encode_cert_trust_list, write);
+	length += encode_empty_set(write);
 
 	return length;
 }
