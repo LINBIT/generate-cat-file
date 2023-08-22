@@ -13,6 +13,7 @@
 #define NULL_TAG	0x05
 #define INTEGER_TAG	0x02
 #define OCTET_STRING_TAG	0x04
+#define BMP_STRING_TAG	0x1E
 #define UTC_TIME_TAG	0x17
 
 struct oid {
@@ -21,6 +22,11 @@ struct oid {
 };
 
 struct octet_string {
+	size_t len;
+	void *data;
+};
+
+struct bmp_string {
 	size_t len;
 	void *data;
 };
@@ -234,6 +240,13 @@ size_t encode_octet_string(struct octet_string *s, bool write)
 	return append_to_buffer(s->len, s->data, write) + l2;
 }
 
+	/* This one is big endian for UFT-16 */
+size_t encode_bmp_string(struct bmp_string *s, bool write)
+{
+	size_t l2 = encode_tag_and_length(BMP_STRING_TAG, s->len, write);
+	return append_to_buffer(s->len, s->data, write) + l2;
+}
+
 size_t encode_utc_time(struct utc_time *t, bool write)
 {
 	size_t len = strlen(t->date_time);
@@ -259,6 +272,26 @@ size_t encode_string_as_utf16(const char *s, bool write)
 	os.data = utf16;
 
 	return encode_octet_string(&os, write);
+}
+
+size_t encode_string_as_utf16_bmp(const char *s, bool write)
+{
+	unsigned short utf16[1000];
+	int i;
+	struct bmp_string os;
+
+	for (i=0;s[i]!='\0' && i<sizeof(utf16)/sizeof(utf16[0]);i++) {
+		utf16[i]=(unsigned char)(s[i]) << 8;
+	}
+	if (s[i] != '\0')
+		fatal("string too long\n");
+	utf16[i] = 0;
+	i++;
+
+	os.len = i*sizeof(utf16[0]);
+	os.data = utf16;
+
+	return encode_bmp_string(&os, write);
 }
 
 size_t encode_oid_with_header(struct oid *oid, bool write)
@@ -316,7 +349,7 @@ size_t encode_file_name(void *p, bool write)
 	struct a_file *f = p;
 	size_t length;
 
-	length = encode_string_as_utf16("File", write);
+	length = encode_string_as_utf16_bmp("File", write);
 	length += encode_integer(268500993, write);
 	length += encode_string_as_utf16(f->file_name, write);
 
