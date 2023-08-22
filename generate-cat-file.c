@@ -45,6 +45,7 @@ struct catalog_list_element {
 	struct oid catalog_list_oid;
 	struct octet_string a_hash;
 	struct utc_time a_time;
+	struct oid catalog_list_member_oid;
 };
 
 struct cert_trust_list {
@@ -277,6 +278,17 @@ size_t encode_algo_sequence(void *p, bool write)
 	return encode_sequence(p, encode_algo, write);
 }
 
+size_t encode_catalog_list_member_oid(void *p, bool write)
+{
+	struct catalog_list_element *e = p;
+	size_t length = 0;
+
+	length += encode_oid_with_header(&e->catalog_list_member_oid, write);
+	length += encode_null(write);
+
+	return length;
+}
+
 size_t encode_catalog_list_oid(void *p, bool write)
 {
 	struct catalog_list_element *e = p;
@@ -292,6 +304,7 @@ size_t encode_catalog_list_elements(void *p, bool write)
 	length += encode_sequence(e, encode_catalog_list_oid, write);
 	length += encode_octet_string(&e->a_hash, write);
 	length += encode_utc_time(&e->a_time, write);
+	length += encode_sequence(p, encode_catalog_list_member_oid, write);
 
 	return length;
 }
@@ -357,6 +370,7 @@ int main(int argc, char ** argv)
 	s.data.cert_trust_list.catalog_list_element.a_hash.len = 16;
 	s.data.cert_trust_list.catalog_list_element.a_hash.data = a_hash;
 	s.data.cert_trust_list.catalog_list_element.a_time.date_time = "221020135745Z";
+	s.data.cert_trust_list.catalog_list_element.catalog_list_member_oid.oid = "1.3.6.1.4.1.311.12.1.2";
 
 	/* compute lengths */
 	/* generate binary DER */
