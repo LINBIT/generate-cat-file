@@ -12,10 +12,21 @@
 #define OID_TAG		0x06
 #define NULL_TAG	0x05
 #define INTEGER_TAG	0x02
+#define OCTET_STRING_TAG	0x04
+#define UTC_TIME_TAG	0x17
 
 struct oid {
 		/* the OID in human readable format */
 	char *oid;
+};
+
+struct octet_string {
+	size_t len;
+	void *data;
+};
+
+struct utc_time {
+	char *date_time;  /* 221020135745Z with trailing '\0' */
 };
 
 struct null {
@@ -30,10 +41,22 @@ struct algo {
 	struct null a_null;
 };
 
+struct catalog_list_element {
+	struct oid catalog_list_oid;
+	struct octet_string a_hash;
+	struct utc_time a_time;
+};
+
+struct cert_trust_list {
+	struct oid cert_trust_oid;
+	struct catalog_list_element catalog_list_element;
+};
+
 struct pkcs7_data {
 	int an_int;
 	/* empty set: using SHA-1 which is default */
 	struct algo algo;
+	struct cert_trust_list cert_trust_list;
 };
 
 struct pkcs7_toplevel {
@@ -192,6 +215,19 @@ size_t encode_tag_and_length(char tag, size_t length, bool write)
 	fatal("This length is not supported\n");
 }
 
+size_t encode_octet_string(struct octet_string *s, bool write)
+{
+	size_t l2 = encode_tag_and_length(OCTET_STRING_TAG, s->len, write);
+	return append_to_buffer(s->len, s->data, write) + l2;
+}
+
+size_t encode_utc_time(struct utc_time *t, bool write)
+{
+	size_t len = strlen(t->date_time);
+	size_t l2 = encode_tag_and_length(UTC_TIME_TAG, len, write);
+	return append_to_buffer(len, t->date_time, write) + l2;
+}
+
 size_t encode_oid_with_header(struct oid *oid, bool write)
 {
 	size_t len = encode_oid(oid->oid, false);
@@ -241,6 +277,41 @@ size_t encode_algo_sequence(void *p, bool write)
 	return encode_sequence(p, encode_algo, write);
 }
 
+size_t encode_catalog_list_oid(void *p, bool write)
+{
+	struct catalog_list_element *e = p;
+
+	return encode_oid_with_header(&e->catalog_list_oid, write);
+}
+
+size_t encode_catalog_list_elements(void *p, bool write)
+{
+	struct catalog_list_element *e = p;
+	size_t length = 0;
+
+	length += encode_sequence(e, encode_catalog_list_oid, write);
+	length += encode_octet_string(&e->a_hash, write);
+	length += encode_utc_time(&e->a_time, write);
+
+	return length;
+}
+
+size_t encode_catalog_list_sequence(void *p, bool write)
+{
+	return encode_sequence(p, encode_catalog_list_elements, write);
+}
+
+size_t encode_cert_trust_list(void *p, bool write)
+{
+	struct cert_trust_list *c = p;
+	size_t length = 0;
+
+	length += encode_oid_with_header(&c->cert_trust_oid, write);
+	length += encode_array(&c->catalog_list_element, encode_catalog_list_sequence, write);
+
+	return length;
+}
+
 size_t encode_pkcs7_data(void *p, bool write)
 {
 	struct pkcs7_data *d = p;
@@ -248,6 +319,7 @@ size_t encode_pkcs7_data(void *p, bool write)
 
 	length += encode_integer(d->an_int, write);
 	length += encode_set(&d->algo, encode_algo_sequence, write);
+	length += encode_sequence(&d->cert_trust_list, encode_cert_trust_list, write);
 
 	return length;
 }
@@ -274,10 +346,17 @@ int main(int argc, char ** argv)
 	struct pkcs7_toplevel s = { 0 };
 	size_t len;
 	/* initialize data structure */
+	char a_hash[16] = {0xDD, 0x43, 0x67, 0xE3, 0x2B, 0xAB, 0xE1, 0x44, 0xB7, 0xCB, 0xEC, 0x31, 0xCE, 0xB9, 0xD5, 0xA6};
 
 	s.signed_data_oid.oid = "1.2.840.113549.1.7.2";
 	s.data.an_int = 1;
 	s.data.algo.algo_oid.oid = "2.16.840.1.101.3.4.2.1";
+	s.data.cert_trust_list.cert_trust_oid.oid = "1.3.6.1.4.1.311.10.1";
+	s.data.cert_trust_list.catalog_list_element.catalog_list_oid.oid =
+		"1.3.6.1.4.1.311.12.1.1";
+	s.data.cert_trust_list.catalog_list_element.a_hash.len = 16;
+	s.data.cert_trust_list.catalog_list_element.a_hash.data = a_hash;
+	s.data.cert_trust_list.catalog_list_element.a_time.date_time = "221020135745Z";
 
 	/* compute lengths */
 	/* generate binary DER */
