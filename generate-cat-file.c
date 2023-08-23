@@ -543,8 +543,8 @@ size_t encode_file_attributes(void *p, bool write)
 	size_t length;
 
 	length = encode_sequence(&f->file_attribute, encode_attribute, write);
-	length += encode_sequence(f, encode_spc_oid, write);
 	length += encode_sequence(&f->os_attribute, encode_attribute, write);
+	length += encode_sequence(f, encode_spc_oid, write);
 	length += encode_sequence(f, encode_member_info_oid, write);
 
 	return length;
@@ -676,7 +676,8 @@ int main(int argc, char ** argv)
 	size_t len;
 	/* initialize data structure */
 //	char a_hash[16] = {0xDD, 0x43, 0x67, 0xE3, 0x2B, 0xAB, 0xE1, 0x44, 0xB7, 0xCB, 0xEC, 0x31, 0xCE, 0xB9, 0xD5, 0xA6};
-	char a_hash[16] = {0xEF, 0xAB, 0xFC, 0x01, 0x4F, 0xD8, 0x47, 0x42, 0xA0, 0x0B, 0x7C, 0x78, 0x8E, 0x6D, 0xD1, 0xC1};
+//	char a_hash[16] = {0xEF, 0xAB, 0xFC, 0x01, 0x4F, 0xD8, 0x47, 0x42, 0xA0, 0x0B, 0x7C, 0x78, 0x8E, 0x6D, 0xD1, 0xC1};
+	char a_hash[16] = {0x58, 0x72, 0xA5, 0x5B, 0xFE, 0xF3, 0xCD, 0x46, 0x91, 0x3C, 0xEF, 0x00, 0xC7, 0x7A, 0x97, 0x69};
 
 	s.signed_data_oid.oid = "1.2.840.113549.1.7.2";
 	s.data.an_int = 1;
@@ -686,7 +687,7 @@ int main(int argc, char ** argv)
 		"1.3.6.1.4.1.311.12.1.1";
 	s.data.cert_trust_list.catalog_list_element.a_hash.len = 16;
 	s.data.cert_trust_list.catalog_list_element.a_hash.data = a_hash;
-	s.data.cert_trust_list.catalog_list_element.a_time.date_time = "221020135745Z";
+	s.data.cert_trust_list.catalog_list_element.a_time.date_time = "230823140713Z";
 	s.data.cert_trust_list.catalog_list_element.catalog_list_member_oid.oid = "1.3.6.1.4.1.311.12.1.2";
 	s.data.cert_trust_list.catalog_list_element.hardware_id.name = "HWID1";
 	s.data.cert_trust_list.catalog_list_element.hardware_id.value = "windrbd";
