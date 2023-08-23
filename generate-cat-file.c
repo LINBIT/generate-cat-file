@@ -533,9 +533,9 @@ size_t encode_file_attributes(void *p, bool write)
 	size_t length;
 
 	length = encode_sequence(&f->file_attribute, encode_attribute, write);
-	length += encode_sequence(f, encode_member_info_oid, write);
 	length += encode_sequence(f, encode_spc_oid, write);
 	length += encode_sequence(&f->os_attribute, encode_attribute, write);
+	length += encode_sequence(f, encode_member_info_oid, write);
 
 	return length;
 }
@@ -678,7 +678,7 @@ int main(int argc, char ** argv)
 	s.data.cert_trust_list.catalog_list_element.os_info.value = "XP_X86,Vista_X86,Vista_X64,7_X86,7_X64,8_X86,8_X64,6_3_X86,6_3_X64,10_X86,10_X64";
 
 	s.data.cert_trust_list.catalog_list_element.nr_files = 2;
-	s.data.cert_trust_list.catalog_list_element.files[0].a_hash = "02CD96EE27BE43EBD9FFA363979235779DFCA";
+	s.data.cert_trust_list.catalog_list_element.files[0].a_hash = "02CD96EE27BE43EBD9FFA363979235779DFCAEF0";
 	s.data.cert_trust_list.catalog_list_element.files[0].file_attribute.value = "windrbd.sys";
 	s.data.cert_trust_list.catalog_list_element.files[0].file_attribute.name = "File";
 	s.data.cert_trust_list.catalog_list_element.files[0].os_attribute.value = "XP_X86,Vista_X86,Vista_X64,7_X86,7_X64,8_X86,8_X64,6_3_X86,6_3_X64,10_X86,10_X64";
@@ -688,8 +688,7 @@ int main(int argc, char ** argv)
 	s.data.cert_trust_list.catalog_list_element.files[0].sha1_hash = "02CD96EE27BE431EBD9FFA31639792035779DFCA";
 	s.data.cert_trust_list.catalog_list_element.files[0].member_info_oid.oid = "1.3.6.1.4.1.311.12.2.2";
 
-
-	s.data.cert_trust_list.catalog_list_element.files[1].a_hash = "6CED62E97D6C2F4F92D43B72DCAAC53B347C4";
+	s.data.cert_trust_list.catalog_list_element.files[1].a_hash = "6CED62E97D6C2F4F92D43B72DCAAC53B347C4EF0";
 	s.data.cert_trust_list.catalog_list_element.files[1].file_attribute.value = "windrbd.sys";
 	s.data.cert_trust_list.catalog_list_element.files[1].file_attribute.name = "File";
 	s.data.cert_trust_list.catalog_list_element.files[1].os_attribute.value = "XP_X86,Vista_X86,Vista_X64,7_X86,7_X64,8_X86,8_X64,6_3_X86,6_3_X64,10_X86,10_X64";
