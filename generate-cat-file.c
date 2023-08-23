@@ -57,7 +57,7 @@ struct an_attribute {
 struct a_file {
 	char *a_hash;
 	char *guid;	/* {C689AAB8-8E78-11D0-8C47-00C04FC295EE} */
-	char *sha1_hash;
+	char *sha1_hash;  /* seems to be the same as a_hash but coded differently */
 
 	struct an_attribute file_attribute;
 	struct an_attribute os_attribute;
@@ -430,7 +430,14 @@ size_t encode_member_info_oid(void *p, bool write)
 
 size_t encode_obsolete_image_data(void *p, bool write)
 {
-	char image_data[0x26] = { 0x03, 0x02, 0x05, 0xA0, 0xA0, 0x20, 0xA2, 0x1E , 0x80 , 0x1C , 0x00 , 0x3C , 0x0, 0x3C, 0x0, 0x3C, 0x00, 0x4F, 0x00, 0x62, 0x00, 0x73, 0x00, 0x6F, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x74, 0x00, 0x65, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E };
+	// kchar image_data[0x26] = { 0x03, 0x02, 0x05, 0xA0, 0xA0, 0x20, 0xA2, 0x1E , 0x80 , 0x1C , 0x00 , 0x3C , 0x0, 0x3C, 0x0, 0x3C, 0x00, 0x4F, 0x00, 0x62, 0x00, 0x73, 0x00, 0x6F, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x74, 0x00, 0x65, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E };
+	char image_data[0x18] = { 0x03, 0x02, 0x05, 0xA0, 0xA0, 0x12, 0xA2, 0x10 , 0x80 , 0x0E, 0x00, 0x5A, 0x00, 0x61, 0x00, 0x6B, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x62, 0x00, 0x74 };
+
+// 03 02 05 A0 A0 12 A2
+// 10 80 0E 00 7A 00 61 00  6B 00 6C 00 65 00 62 00
+// 74 30 21 30 09 06 05 2B
+// zaklebt: hacked catgen
+// 007A0061006B006C006500620074
 
 	return append_to_buffer(sizeof(image_data), image_data, write);
 }
@@ -451,11 +458,16 @@ size_t encode_spc_link(void *p, bool write)
 {
 	size_t length;
 	struct oid spc_link_oid = { "1.3.6.1.4.1.311.2.1.25" };
-	char link_data[0x20] = {
+/*	char link_data[0x20] = {
 		0xA2, 0x1E, 0x80, 0x1C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x3C,
 		0x00, 0x4F, 0x00, 0x62, 0x00, 0x73, 0x00, 0x6F, 0x00, 0x6C,
 		0x00, 0x65, 0x00, 0x74, 0x00, 0x65, 0x00, 0x3E, 0x00, 0x3E,
 		0x00, 0x3E };
+*/
+	char link_data[0x12] = { 0xA2, 0x10, 0x80, 0x0E, 0x00, 0x7A, 0x00, 0x61, 0x00, 0x6B, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x62, 0x00, 0x74 };
+
+// A2 10 80 0E 00 7A
+// 00 61 00 6B 00 6C 00 65  00 62 00 74 
 
 	length = encode_oid_with_header(&spc_link_oid, write);
 	length += append_to_buffer(sizeof(link_data), link_data, write);
@@ -693,32 +705,40 @@ int main(int argc, char ** argv)
 	s.data.cert_trust_list.catalog_list_element.hardware_id.value = "windrbd";
 	s.data.cert_trust_list.catalog_list_element.hardware_id.encode_as_set = false;
 	s.data.cert_trust_list.catalog_list_element.os_info.name = "OS";
-	s.data.cert_trust_list.catalog_list_element.os_info.value = "XP_X86,Vista_X86,Vista_X64,7_X86,7_X64,8_X86,8_X64,6_3_X86,6_3_X64,10_X86,10_X64";
+//	s.data.cert_trust_list.catalog_list_element.os_info.value = "XP_X86,Vista_X86,Vista_X64,7_X86,7_X64,8_X86,8_X64,6_3_X86,6_3_X64,10_X86,10_X64";
+	s.data.cert_trust_list.catalog_list_element.os_info.value = "7X64,8X64,10X64";
 	s.data.cert_trust_list.catalog_list_element.os_info.encode_as_set = false;
 
 	s.data.cert_trust_list.catalog_list_element.nr_files = 2;
 
 	// s.data.cert_trust_list.catalog_list_element.files[0].a_hash = "6CED62E97D6C2F4F92D43B72DCAAC53B347C4EF0";
-	s.data.cert_trust_list.catalog_list_element.files[0].a_hash = "30f2fd92e39558d645c976fad58cc7bd28214f70";
+	s.data.cert_trust_list.catalog_list_element.files[0].a_hash = "30F2FD92E39558D645C976FAD58CC7BD28214F70";
+	s.data.cert_trust_list.catalog_list_element.files[0].sha1_hash = "30F2FD92E39558D645C976FAD58CC7BD28214F70";
 	s.data.cert_trust_list.catalog_list_element.files[0].file_attribute.value = "windrbd.inf";
 	s.data.cert_trust_list.catalog_list_element.files[0].file_attribute.name = "File";
 	s.data.cert_trust_list.catalog_list_element.files[0].file_attribute.encode_as_set = true;
-	s.data.cert_trust_list.catalog_list_element.files[0].os_attribute.value = "XP_X86,Vista_X86,Vista_X64,7_X86,7_X64,8_X86,8_X64,6_3_X86,6_3_X64,10_X86,10_X64";
+	s.data.cert_trust_list.catalog_list_element.files[0].os_attribute.value = "2:6.1,2:6.2,2:6.4";
 	s.data.cert_trust_list.catalog_list_element.files[0].os_attribute.name = "OSAttr";
 	s.data.cert_trust_list.catalog_list_element.files[0].os_attribute.encode_as_set = true;
 	s.data.cert_trust_list.catalog_list_element.files[0].guid = "{DE351A42-8E59-11D0-8C47-00C04FC295EE}";
 	s.data.cert_trust_list.catalog_list_element.files[0].is_link = true;
-	s.data.cert_trust_list.catalog_list_element.files[0].sha1_hash = "6CED062E97D6C2F4F92D431B72DCAAC530B347C4";
+//	s.data.cert_trust_list.catalog_list_element.files[0].sha1_hash = "6CED062E97D6C2F4F92D431B72DCAAC530B347C4";
 	s.data.cert_trust_list.catalog_list_element.files[0].member_info_oid.oid = "1.3.6.1.4.1.311.12.2.2";
 
-	s.data.cert_trust_list.catalog_list_element.files[1].a_hash = "02CD96EE27BE43EBD9FFA363979235779DFCAEF0";
+	// s.data.cert_trust_list.catalog_list_element.files[1].a_hash = "02CD96EE27BE431EBD9FFA31639792035779DFCA";
+	// s.data.cert_trust_list.catalog_list_element.files[1].sha1_hash = "02CD96EE27BE431EBD9FFA31639792035779DFCA";
+	s.data.cert_trust_list.catalog_list_element.files[1].a_hash = "D34175435DC7C7FF99A501DE9B9852D1FBDF59E3";
+	s.data.cert_trust_list.catalog_list_element.files[1].sha1_hash = "D34175435DC7C7FF99A501DE9B9852D1FBDF59E3";
+	// s.data.cert_trust_list.catalog_list_element.files[1].a_hash = "B93DEF8D5091731B795113B8B23C433E3E98197E";
+	// s.data.cert_trust_list.catalog_list_element.files[1].sha1_hash = "B93DEF8D5091731B795113B8B23C433E3E98197E";
 	s.data.cert_trust_list.catalog_list_element.files[1].file_attribute.value = "windrbd.sys";
 	s.data.cert_trust_list.catalog_list_element.files[1].file_attribute.name = "File";
-	s.data.cert_trust_list.catalog_list_element.files[1].os_attribute.value = "XP_X86,Vista_X86,Vista_X64,7_X86,7_X64,8_X86,8_X64,6_3_X86,6_3_X64,10_X86,10_X64";
+	s.data.cert_trust_list.catalog_list_element.files[1].file_attribute.encode_as_set = true;
+	s.data.cert_trust_list.catalog_list_element.files[1].os_attribute.value = "2:6.1,2:6.2,2:6.4";
 	s.data.cert_trust_list.catalog_list_element.files[1].os_attribute.name = "OSAttr";
+	s.data.cert_trust_list.catalog_list_element.files[1].os_attribute.encode_as_set = true;
 	s.data.cert_trust_list.catalog_list_element.files[1].guid = "{C689AAB8-8E78-11D0-8C47-00C04FC295EE}";
 	s.data.cert_trust_list.catalog_list_element.files[1].is_link = false;
-	s.data.cert_trust_list.catalog_list_element.files[1].sha1_hash = "02CD96EE27BE431EBD9FFA31639792035779DFCA";
 	s.data.cert_trust_list.catalog_list_element.files[1].member_info_oid.oid = "1.3.6.1.4.1.311.12.2.2";
 
 	/* compute lengths */
