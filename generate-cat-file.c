@@ -691,7 +691,12 @@ int main(int argc, char ** argv)
 //	char a_hash[16] = {0xEF, 0xAB, 0xFC, 0x01, 0x4F, 0xD8, 0x47, 0x42, 0xA0, 0x0B, 0x7C, 0x78, 0x8E, 0x6D, 0xD1, 0xC1};
 // this is correct:
 	// char a_hash[16] = {0x58, 0x72, 0xA5, 0x5B, 0xFE, 0xF3, 0xCD, 0x46, 0x91, 0x3C, 0xEF, 0x00, 0xC7, 0x7A, 0x97, 0x69};
-	char a_hash[16] = {0x59, 0x72, 0xA5, 0x5B, 0xFE, 0xF3, 0xCD, 0x46, 0x91, 0x3C, 0xEF, 0x00, 0xC7, 0x7A, 0x97, 0x69};
+	// char a_hash[16] = {0x59, 0x72, 0xA5, 0x5B, 0xFE, 0xF3, 0xCD, 0x46, 0x91, 0x3C, 0xEF, 0x00, 0xC7, 0x7A, 0x97, 0x69};
+	char a_hash[16];
+	int i;
+
+	for (i=0;i<sizeof(a_hash);i++)
+		a_hash[i] = i;
 
 	s.signed_data_oid.oid = "1.2.840.113549.1.7.2";
 	s.data.an_int = 1;
@@ -729,8 +734,12 @@ int main(int argc, char ** argv)
 
 	// s.data.cert_trust_list.catalog_list_element.files[1].a_hash = "02CD96EE27BE431EBD9FFA31639792035779DFCA";
 	// s.data.cert_trust_list.catalog_list_element.files[1].sha1_hash = "02CD96EE27BE431EBD9FFA31639792035779DFCA";
+// this is correct:
 	s.data.cert_trust_list.catalog_list_element.files[1].a_hash = "D34175435DC7C7FF99A501DE9B9852D1FBDF59E3";
 	s.data.cert_trust_list.catalog_list_element.files[1].sha1_hash = "D34175435DC7C7FF99A501DE9B9852D1FBDF59E3";
+// this does not load:
+//	s.data.cert_trust_list.catalog_list_element.files[1].a_hash = "034175435DC7C7FF99A501DE9B9852D1FBDF59E3";
+//	s.data.cert_trust_list.catalog_list_element.files[1].sha1_hash = "034175435DC7C7FF99A501DE9B9852D1FBDF59E3";
 	// s.data.cert_trust_list.catalog_list_element.files[1].a_hash = "B93DEF8D5091731B795113B8B23C433E3E98197E";
 	// s.data.cert_trust_list.catalog_list_element.files[1].sha1_hash = "B93DEF8D5091731B795113B8B23C433E3E98197E";
 	s.data.cert_trust_list.catalog_list_element.files[1].file_attribute.value = "windrbd.sys";
