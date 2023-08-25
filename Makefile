@@ -1,6 +1,6 @@
 CFLAGS=-Wall -g
 
-all: generate-cat-file
+all: generate-cat-file strip-pe-image
 
 clean:
-	rm -f generate-cat-file
+	rm -f generate-cat-file strip-pe-image
