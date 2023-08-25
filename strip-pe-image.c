@@ -91,12 +91,16 @@ bool is_pe_image(const char *buffer, size_t buffer_size)
 bool strip_and_write(const char *buffer, size_t buffer_size)
 {
 	uint32_t pe_header_offset;
+	uint16_t pe_magic;
 	size_t pos=0;
 	uint32_t file_offset_of_certificate_table;
 	uint32_t size_of_certificate_table;
 
 	REQUIRE_SIZE(0x40, buffer_size);
 	pe_header_offset = *(uint32_t*)(buffer+0x3c);
+
+	REQUIRE_SIZE(pe_header_offset+0x20, buffer_size);
+	pe_magic = *(uint16_t*)(buffer+pe_header_offset+0x18);
 
 		/* Write the DOS header */
 	WRITE(pe_header_offset);
@@ -106,7 +110,17 @@ bool strip_and_write(const char *buffer, size_t buffer_size)
 	WRITE(0x1c);
 
 		/* Data Directories up to Certificate table */
-	WRITE(0x30);
+	switch (pe_magic) {
+	case 0x20b:	/* PE32+ 64 bit executable */
+		WRITE(0x30);
+		break;
+	case 0x10b:	/* PE32 32 bit executable */
+		WRITE(0x20);
+		break;
+	default:
+		fprintf(stderr, "Invalid or unsupported PE magic %04x\n", pe_magic);
+		return false;
+	}
 	file_offset_of_certificate_table = *(uint32_t*)(buffer+pos);
 	size_of_certificate_table = *(uint32_t*)(buffer+pos+4);
 	SKIP(8);
