@@ -47,15 +47,26 @@ char *read_file(const char *fname, long *size_return)
 	return buffer;
 }
 
+#define REQUIRE_SIZE(want,have) \
+	{ \
+		if (have < want) { \
+			fprintf(stderr, "buffer overflow (want=%d, have=%zd)\n", want, have); \
+			return false; \
+		} \
+	}
+
 bool is_pe_image(const char *buffer, size_t buffer_size)
 {
 	uint32_t pe_header_offset;
 
+	REQUIRE_SIZE(2, buffer_size);
 	if (buffer[0] != 'M' || buffer[1] != 'Z') {
 		fprintf(stderr, "No DOS header magic ('MZ')\n");
 		return false;
 	}
 	pe_header_offset = *(uint32_t*)(buffer+0x3c);
+
+	REQUIRE_SIZE(pe_header_offset+2, buffer_size);
 	if (buffer[pe_header_offset] != 'P' || buffer[pe_header_offset+1] != 'E') {
 		fprintf(stderr, "No PE header magic ('PE')\n");
 		return false;
