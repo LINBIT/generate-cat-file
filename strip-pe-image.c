@@ -111,11 +111,16 @@ bool strip_and_write(const char *buffer, size_t buffer_size)
 	size_of_certificate_table = *(uint32_t*)(buffer+pos+4);
 	SKIP(8);
 
-		/* Everything up to start of certificate table */
-	WRITE(file_offset_of_certificate_table-pos);
-	SKIP(size_of_certificate_table);
+	if (file_offset_of_certificate_table != 0) {
 
-		/* Everything after the certificate table */
+			/* Everything up to start of certificate table */
+		WRITE(file_offset_of_certificate_table-pos);
+		SKIP(size_of_certificate_table);
+	}
+
+	/* Everything after the certificate table or the
+	 * data directory entry (if there are no certficates)
+	 */
 
 	if (pos > buffer_size) {
 		fprintf(stderr, "Uh were accessing after end of file. Sorry for that\n");
