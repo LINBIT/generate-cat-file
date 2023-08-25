@@ -92,12 +92,36 @@ bool strip_and_write(const char *buffer, size_t buffer_size)
 {
 	uint32_t pe_header_offset;
 	size_t pos=0;
+	uint32_t file_offset_of_certificate_table;
+	uint32_t size_of_certificate_table;
 
 	REQUIRE_SIZE(0x40, buffer_size);
 	pe_header_offset = *(uint32_t*)(buffer+0x3c);
 
-	SKIP(0x2);
-	WRITE(0x80);
+		/* Write the DOS header */
+	WRITE(pe_header_offset);
+		/* PE header without checksum field */
+	WRITE(0x58);
+	SKIP(4);
+	WRITE(0x1c);
+
+		/* Data Directories up to Certificate table */
+	WRITE(0x30);
+	file_offset_of_certificate_table = *(uint32_t*)(buffer+pos);
+	size_of_certificate_table = *(uint32_t*)(buffer+pos+4);
+	SKIP(8);
+
+		/* Everything up to start of certificate table */
+	WRITE(file_offset_of_certificate_table-pos);
+	SKIP(size_of_certificate_table);
+
+		/* Everything after the certificate table */
+
+	if (pos > buffer_size) {
+		fprintf(stderr, "Uh were accessing after end of file. Sorry for that\n");
+		return false;
+	}
+	WRITE(buffer_size-pos);
 
 	return true;
 }
