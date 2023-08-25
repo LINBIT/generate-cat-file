@@ -97,7 +97,7 @@ bool strip_and_write(const char *buffer, size_t buffer_size)
 	pe_header_offset = *(uint32_t*)(buffer+0x3c);
 
 	SKIP(0x2);
-	WRITE(0x40);
+	WRITE(0x80);
 
 	return true;
 }
