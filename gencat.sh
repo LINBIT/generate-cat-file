@@ -21,8 +21,9 @@ OUTPUT_CAT_FILE=-
 HARDWARE_ID=windrbd
 OS_STRING=7X64,8X64,10X64
 OS_ATTR=2:6.1,2:6.2,2:6.4
+DRY_RUN=0
 
-args=$( getopt o:h:O:A: $* )
+args=$( getopt do:h:O:A: $* )
 if [ $? -ne 0 ]
 then
 	usage_and_exit
@@ -34,6 +35,10 @@ for arg
 do
 	case "$arg"
 	in
+		-d)
+			DRY_RUN=1
+			shift
+			;;
 		-o)
 			OUTPUT_CAT_FILE=$2
 			shift
@@ -77,11 +82,22 @@ do
 
 	if $EXEC_DIR/strip-pe-image $f > /dev/null 2>/dev/null
 	then
-		images[$i]=$( basename $f ):$( $EXEC_DIR/strip-pe-image $f | sha1sum | cut -d' ' -f 1 ):PE
+		images[$i]=$( basename $f ):$( $EXEC_DIR/strip-pe-image $f | sha1sum | cut -d' ' -f 1 | tr [:lower:] [:upper:] ):PE
 	else
-		images[$i]=$( basename $f ):$( cat $f | sha1sum | cut -d' ' -f 1 )
+		images[$i]=$( basename $f ):$( cat $f | sha1sum | cut -d' ' -f 1 | tr [:lower:] [:upper:] )
 	fi
 	i=$[ $i+1 ]
 done
 
-$EXEC_DIR/generate-cat-file -A $OS_ATTR -O $OS_STRING -h $HARDWARE_ID ${images[*]}
+if [ $DRY_RUN -eq 1 ]
+then
+	echo $EXEC_DIR/generate-cat-file -A $OS_ATTR -O $OS_STRING -h $HARDWARE_ID ${images[*]}
+	exit 0
+fi
+
+if [ $OUTPUT_CAT_FILE == '-' ]
+then
+	$EXEC_DIR/generate-cat-file -A $OS_ATTR -O $OS_STRING -h $HARDWARE_ID ${images[*]}
+else
+	$EXEC_DIR/generate-cat-file -A $OS_ATTR -O $OS_STRING -h $HARDWARE_ID ${images[*]} > $OUTPUT_CAT_FILE
+fi
