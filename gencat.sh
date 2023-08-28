@@ -89,15 +89,18 @@ do
 	i=$[ $i+1 ]
 done
 
+IFS=$'\n' sorted_images=($(sort -t: -k2 <<<"${images[*]}"))
+unset IFS
+
 if [ $DRY_RUN -eq 1 ]
 then
-	echo $EXEC_DIR/generate-cat-file -A $OS_ATTR -O $OS_STRING -h $HARDWARE_ID ${images[*]}
+	echo $EXEC_DIR/generate-cat-file -A $OS_ATTR -O $OS_STRING -h $HARDWARE_ID ${sorted_images[*]}
 	exit 0
 fi
 
 if [ $OUTPUT_CAT_FILE == '-' ]
 then
-	$EXEC_DIR/generate-cat-file -A $OS_ATTR -O $OS_STRING -h $HARDWARE_ID ${images[*]}
+	$EXEC_DIR/generate-cat-file -A $OS_ATTR -O $OS_STRING -h $HARDWARE_ID ${sorted_images[*]}
 else
-	$EXEC_DIR/generate-cat-file -A $OS_ATTR -O $OS_STRING -h $HARDWARE_ID ${images[*]} > $OUTPUT_CAT_FILE
+	$EXEC_DIR/generate-cat-file -A $OS_ATTR -O $OS_STRING -h $HARDWARE_ID ${sorted_images[*]} > $OUTPUT_CAT_FILE
 fi
