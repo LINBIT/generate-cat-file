@@ -4,6 +4,7 @@
 #include <string.h>
 #include <sys/errno.h>
 #include <ctype.h>
+#include <unistd.h>
 
 /* DER encoding */
 
@@ -76,12 +77,12 @@ struct catalog_list_element {
 	struct an_attribute os_info;
 
 	int nr_files;
-	struct a_file files[2];
+	struct a_file files[0];
 };
 
 struct cert_trust_list {
 	struct oid cert_trust_oid;
-	struct catalog_list_element catalog_list_element;
+	struct catalog_list_element *catalog_list_element;
 };
 
 struct pkcs7_data {
@@ -483,7 +484,7 @@ int hexdigit(char c)
 	if (c>='A' && c<='F')
 		return c-'A'+10;
 
-	fatal("invalid hex digit");
+	fatal("invalid hex digit\n");
 }
 
 size_t encode_spc_algo_oid(void *p, bool write)
@@ -646,7 +647,7 @@ size_t encode_cert_trust_list(void *p, bool write)
 	size_t length = 0;
 
 	length += encode_oid_with_header(&c->cert_trust_oid, write);
-	length += encode_array(&c->catalog_list_element, encode_catalog_list_sequence, write);
+	length += encode_array(c->catalog_list_element, encode_catalog_list_sequence, write);
 
 	return length;
 }
@@ -682,6 +683,64 @@ size_t encode_pkcs7_toplevel(void *p, bool write)
 	return length;
 }
 
+void __attribute((noreturn)) usage_and_exit(void)
+{
+	fprintf(stderr, "Usage: generate_cat_file [-h <hardware-id>] [-O OS string] [-A OS attribute string] file-with-hash1 [ file-with-hash2 ... ]\n");
+	fprintf(stderr, "Generates a Microsoft Security Catalog (\".cat\") file.\n");
+	fprintf(stderr, "file-with-hash has the format filename:sha1-hash-in-hex[:PE]\n");
+	fprintf(stderr, "Use osslsigncode to sign it afterwards.\n");
+	exit(1);
+}
+
+void parse_file_arg(char *arg, struct a_file *f, char *os_attr)
+{
+	char *s = strdup(arg);
+	char *fname, *hash, *s1;
+	bool is_pe;
+
+	if (s == NULL) {
+		fatal("Out of memory");
+	}
+	fname = s;
+	for (s1=s;*s1 && *s1 != ':';s1++) ;
+	if (!*s1) {
+		usage_and_exit();
+	}
+	*s1 = '\0';
+	s1++;
+	hash = s1;
+	for (s1=s;*s1 && *s1 != ':';s1++) ;
+	if (!*s1) {
+		is_pe = false;
+	} else {
+		s1++;
+		if (strcmp("PE", s1) == 0) {
+			is_pe = true;
+		} else {
+			usage_and_exit();
+		}
+	}
+
+	f->a_hash = hash;
+	f->sha1_hash = hash;
+
+	f->file_attribute.value = fname;
+	f->file_attribute.name = "File";
+	f->os_attribute.value = os_attr;
+	f->os_attribute.name = "OSAttr";
+	f->member_info_oid.oid = "1.3.6.1.4.1.311.12.2.2";
+	f->file_attribute.encode_as_set = true;
+	f->os_attribute.encode_as_set = true;
+
+	if (is_pe) {
+		f->guid = "{DE351A42-8E59-11D0-8C47-00C04FC295EE}";
+		f->is_link = true;
+	} else {
+		f->guid = "{C689AAB8-8E78-11D0-8C47-00C04FC295EE}";
+		f->is_link = false;
+	}
+}
+
 int main(int argc, char ** argv)
 {
 	struct pkcs7_toplevel s = { 0 };
@@ -695,6 +754,35 @@ int main(int argc, char ** argv)
 	char a_hash[16];
 	int i;
 
+	char *os_string = "7X64,8X64,10X64";
+	char *os_attr_string = "2:6.1,2:6.2,2:6.4";
+	char *hardware_id = "windrbd";
+	int nr_files;
+	char c;
+
+	while ((c = getopt(argc, argv, "h:A:O:")) != -1) {
+		switch (c) {
+		case 'h':
+			hardware_id = optarg;
+			break;
+		case 'A':
+			os_attr_string = optarg;
+			break;
+		case 'O':
+			os_string = optarg;
+			break;
+		default:
+			usage_and_exit();
+		}
+	}
+	if (argc <= optind) {
+		usage_and_exit();
+	}
+	nr_files = argc-optind;
+	s.data.cert_trust_list.catalog_list_element = malloc(sizeof(struct catalog_list_element)+sizeof(struct a_file)*nr_files);
+	if (s.data.cert_trust_list.catalog_list_element == NULL) {
+		fatal("Out of memory");
+	}
 	for (i=0;i<sizeof(a_hash);i++)
 		a_hash[i] = i;
 
@@ -702,55 +790,26 @@ int main(int argc, char ** argv)
 	s.data.an_int = 1;
 	s.data.algo.algo_oid.oid = "2.16.840.1.101.3.4.2.1";
 	s.data.cert_trust_list.cert_trust_oid.oid = "1.3.6.1.4.1.311.10.1";
-	s.data.cert_trust_list.catalog_list_element.catalog_list_oid.oid =
+	s.data.cert_trust_list.catalog_list_element->catalog_list_oid.oid =
 		"1.3.6.1.4.1.311.12.1.1";
-	s.data.cert_trust_list.catalog_list_element.a_hash.len = 16;
-	s.data.cert_trust_list.catalog_list_element.a_hash.data = a_hash;
-	s.data.cert_trust_list.catalog_list_element.a_time.date_time = "230823140713Z";
-	s.data.cert_trust_list.catalog_list_element.catalog_list_member_oid.oid = "1.3.6.1.4.1.311.12.1.2";
-	s.data.cert_trust_list.catalog_list_element.hardware_id.name = "HWID1";
-	s.data.cert_trust_list.catalog_list_element.hardware_id.value = "windrbd";
-	s.data.cert_trust_list.catalog_list_element.hardware_id.encode_as_set = false;
-	s.data.cert_trust_list.catalog_list_element.os_info.name = "OS";
-//	s.data.cert_trust_list.catalog_list_element.os_info.value = "XP_X86,Vista_X86,Vista_X64,7_X86,7_X64,8_X86,8_X64,6_3_X86,6_3_X64,10_X86,10_X64";
-	s.data.cert_trust_list.catalog_list_element.os_info.value = "7X64,8X64,10X64";
-	s.data.cert_trust_list.catalog_list_element.os_info.encode_as_set = false;
+	s.data.cert_trust_list.catalog_list_element->a_hash.len = 16;
+	s.data.cert_trust_list.catalog_list_element->a_hash.data = a_hash;
+	s.data.cert_trust_list.catalog_list_element->a_time.date_time = "230823140713Z";
+	s.data.cert_trust_list.catalog_list_element->catalog_list_member_oid.oid = "1.3.6.1.4.1.311.12.1.2";
+	s.data.cert_trust_list.catalog_list_element->hardware_id.name = "HWID1";
+	s.data.cert_trust_list.catalog_list_element->hardware_id.value = hardware_id;
+	s.data.cert_trust_list.catalog_list_element->hardware_id.encode_as_set = false;
+	s.data.cert_trust_list.catalog_list_element->os_info.name = "OS";
+//	s.data.cert_trust_list.catalog_list_element->os_info.value = "XP_X86,Vista_X86,Vista_X64,7_X86,7_X64,8_X86,8_X64,6_3_X86,6_3_X64,10_X86,10_X64";
+	s.data.cert_trust_list.catalog_list_element->os_info.value = os_string;
+	s.data.cert_trust_list.catalog_list_element->os_info.encode_as_set = false;
 
-	s.data.cert_trust_list.catalog_list_element.nr_files = 2;
+	s.data.cert_trust_list.catalog_list_element->nr_files = nr_files;
 
-	// s.data.cert_trust_list.catalog_list_element.files[0].a_hash = "6CED62E97D6C2F4F92D43B72DCAAC53B347C4EF0";
-	s.data.cert_trust_list.catalog_list_element.files[0].a_hash = "30F2FD92E39558D645C976FAD58CC7BD28214F70";
-	s.data.cert_trust_list.catalog_list_element.files[0].sha1_hash = "30F2FD92E39558D645C976FAD58CC7BD28214F70";
-	s.data.cert_trust_list.catalog_list_element.files[0].file_attribute.value = "windrbd.inf";
-	s.data.cert_trust_list.catalog_list_element.files[0].file_attribute.name = "File";
-	s.data.cert_trust_list.catalog_list_element.files[0].file_attribute.encode_as_set = true;
-	s.data.cert_trust_list.catalog_list_element.files[0].os_attribute.value = "2:6.1,2:6.2,2:6.4";
-	s.data.cert_trust_list.catalog_list_element.files[0].os_attribute.name = "OSAttr";
-	s.data.cert_trust_list.catalog_list_element.files[0].os_attribute.encode_as_set = true;
-	s.data.cert_trust_list.catalog_list_element.files[0].guid = "{DE351A42-8E59-11D0-8C47-00C04FC295EE}";
-	s.data.cert_trust_list.catalog_list_element.files[0].is_link = true;
-//	s.data.cert_trust_list.catalog_list_element.files[0].sha1_hash = "6CED062E97D6C2F4F92D431B72DCAAC530B347C4";
-	s.data.cert_trust_list.catalog_list_element.files[0].member_info_oid.oid = "1.3.6.1.4.1.311.12.2.2";
+	for (i=0;i<nr_files;i++) {
+		parse_file_arg(argv[i+optind], &s.data.cert_trust_list.catalog_list_element->files[i], os_attr_string);
+	}
 
-	// s.data.cert_trust_list.catalog_list_element.files[1].a_hash = "02CD96EE27BE431EBD9FFA31639792035779DFCA";
-	// s.data.cert_trust_list.catalog_list_element.files[1].sha1_hash = "02CD96EE27BE431EBD9FFA31639792035779DFCA";
-// this is correct:
-	s.data.cert_trust_list.catalog_list_element.files[1].a_hash = "D34175435DC7C7FF99A501DE9B9852D1FBDF59E3";
-	s.data.cert_trust_list.catalog_list_element.files[1].sha1_hash = "D34175435DC7C7FF99A501DE9B9852D1FBDF59E3";
-// this does not load:
-//	s.data.cert_trust_list.catalog_list_element.files[1].a_hash = "034175435DC7C7FF99A501DE9B9852D1FBDF59E3";
-//	s.data.cert_trust_list.catalog_list_element.files[1].sha1_hash = "034175435DC7C7FF99A501DE9B9852D1FBDF59E3";
-	// s.data.cert_trust_list.catalog_list_element.files[1].a_hash = "B93DEF8D5091731B795113B8B23C433E3E98197E";
-	// s.data.cert_trust_list.catalog_list_element.files[1].sha1_hash = "B93DEF8D5091731B795113B8B23C433E3E98197E";
-	s.data.cert_trust_list.catalog_list_element.files[1].file_attribute.value = "windrbd.sys";
-	s.data.cert_trust_list.catalog_list_element.files[1].file_attribute.name = "File";
-	s.data.cert_trust_list.catalog_list_element.files[1].file_attribute.encode_as_set = true;
-	s.data.cert_trust_list.catalog_list_element.files[1].os_attribute.value = "2:6.1,2:6.2,2:6.4";
-	s.data.cert_trust_list.catalog_list_element.files[1].os_attribute.name = "OSAttr";
-	s.data.cert_trust_list.catalog_list_element.files[1].os_attribute.encode_as_set = true;
-	s.data.cert_trust_list.catalog_list_element.files[1].guid = "{C689AAB8-8E78-11D0-8C47-00C04FC295EE}";
-	s.data.cert_trust_list.catalog_list_element.files[1].is_link = false;
-	s.data.cert_trust_list.catalog_list_element.files[1].member_info_oid.oid = "1.3.6.1.4.1.311.12.2.2";
 
 	/* compute lengths */
 	/* generate binary DER */
