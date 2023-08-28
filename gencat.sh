@@ -84,4 +84,4 @@ do
 	i=$[ $i+1 ]
 done
 
-echo $EXEC_DIR/generate-cat-file -A $OS_ATTR -O $OS_STRING -h $HARDWARE_ID ${images[*]}
+$EXEC_DIR/generate-cat-file -A $OS_ATTR -O $OS_STRING -h $HARDWARE_ID ${images[*]}
