@@ -756,8 +756,8 @@ int main(int argc, char ** argv)
 	char a_hash[16];
 	int i;
 
-	char *os_string = "7X64,8X64,10X64";
-	char *os_attr_string = "2:6.1,2:6.2,2:6.4";
+	char *os_string = "7X64,8X64,_v100_X64";
+	char *os_attr_string = "2:6.1,2:6.2,2:10.0";
 	char *hardware_id = "windrbd";
 	int nr_files;
 	char c;
