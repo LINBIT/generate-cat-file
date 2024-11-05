@@ -280,10 +280,11 @@ size_t encode_string_as_utf16(const char *s, bool write)
 	int i;
 	struct octet_string os;
 
-	for (i=0;s[i]!='\0' && i<sizeof(utf16)/sizeof(utf16[0]);i++) {
+#define ARRAY_SIZE(a) (sizeof(a)/sizeof(a[0]))
+	for (i=0;i<ARRAY_SIZE(utf16) && s[i]!='\0';i++) {
 		utf16[i]=(unsigned char)(s[i]);
 	}
-	if (s[i] != '\0')
+	if (i >= ARRAY_SIZE(utf16))
 		fatal("string too long\n");
 	utf16[i] = 0;
 	i++;
