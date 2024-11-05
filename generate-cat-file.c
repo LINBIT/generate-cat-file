@@ -734,11 +734,11 @@ void parse_file_arg(char *arg, struct a_file *f, char *os_attr)
 	f->os_attribute.encode_as_set = true;
 
 	if (is_pe) {
-		f->guid = "{DE351A42-8E59-11D0-8C47-00C04FC295EE}";
-		f->is_link = true;
-	} else {
 		f->guid = "{C689AAB8-8E78-11D0-8C47-00C04FC295EE}";
 		f->is_link = false;
+	} else {
+		f->guid = "{DE351A42-8E59-11D0-8C47-00C04FC295EE}";
+		f->is_link = true;
 	}
 }
 
