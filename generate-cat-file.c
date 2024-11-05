@@ -277,13 +277,13 @@ size_t encode_utc_time(struct utc_time *t, bool write)
 size_t encode_string_as_utf16(const char *s, bool write)
 {
 	unsigned short utf16[1000];
-	int i;
+	int i, l;
 	struct octet_string os;
 
-	for (i=0;s[i]!='\0' && i<sizeof(utf16)/sizeof(utf16[0]);i++) {
+	for (i=0,l=sizeof(utf16)/sizeof(utf16[0]);i<l && s[i]!='\0';i++) {
 		utf16[i]=(unsigned char)(s[i]);
 	}
-	if (s[i] != '\0')
+	if (i >= l)
 		fatal("string too long\n");
 	utf16[i] = 0;
 	i++;
