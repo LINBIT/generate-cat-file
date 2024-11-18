@@ -97,8 +97,9 @@ struct pkcs7_toplevel {
 	struct pkcs7_data data;
 };
 
-size_t buflen;
-char buffer[1024*1024];
+size_t buflen = 0;
+size_t bufsz = 0;
+char *buffer = NULL;
 
 void __attribute((noreturn)) fatal(const char *msg)
 {
@@ -108,13 +109,15 @@ void __attribute((noreturn)) fatal(const char *msg)
 
 size_t append_to_buffer(size_t n, char *data, bool write)
 {
-	if (buflen + n >= sizeof(buffer)) {
-		fatal("buffer size too small, please recompile with bigger buffer.\n");
-	}
+	if (write)
+	{
+		if (buffer == NULL)
+			fatal("buffer not initialized\n");
+		if ((buflen + n) > bufsz)
+			fatal("insufficient buffer size\n");
 
-	if (write) {
-		memcpy(buffer+buflen, data, n);
-		buflen+=n;
+		memcpy(buffer + buflen, data, n);
+		buflen += n;
 	}
 	return n;
 }
@@ -684,6 +687,32 @@ size_t encode_pkcs7_toplevel(void *p, bool write)
 	return length;
 }
 
+void create_binary_tree(void *s)
+{
+	/* compute sufficient buffer size */
+	buflen = 0;
+	size_t data_length = encode_pkcs7_toplevel(s, false);
+	bufsz = encode_tag_and_length(SEQUENCE_TAG, data_length, false) + data_length;
+
+	/* place for extra limitation
+	   take a note:
+	     while limitation of the redirection usually not reachable or depends on the target file system
+	     it's much lower for pipes https://unix.stackexchange.com/a/11954
+	*/
+
+	/* create buffer of computed size */
+	buffer = malloc(bufsz);
+	if (buffer == NULL)
+		fatal("out of memory");
+	/* write data to buffer */
+	encode_tag_and_length(SEQUENCE_TAG, data_length, true);
+	encode_pkcs7_toplevel(s, true);
+
+	/* check written data length */
+	if (buflen != bufsz)
+		fatal("length mismatch\n");
+}
+
 void __attribute((noreturn)) usage_and_exit(void)
 {
 	fprintf(stderr, "Usage: generate_cat_file [-h <hardware-id>] [-O OS string] [-A OS attribute string] file-with-hash1 [ file-with-hash2 ... ]\n");
@@ -813,12 +842,9 @@ int main(int argc, char ** argv)
 	}
 
 
-	/* compute lengths */
-	/* generate binary DER */
-	len = encode_sequence(&s, encode_pkcs7_toplevel, true);
-	if (len != buflen)
-		fatal("length mismatch\n");
 
-		/* and write to stdout or so ... */
+	/* generate binary DER */
+	create_binary_tree(&s);
+	/* and write to stdout or so ... */
 	fwrite(buffer, buflen, 1, stdout);
 }
