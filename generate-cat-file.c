@@ -18,9 +18,13 @@
 #define BMP_STRING_TAG	0x1E
 #define UTC_TIME_TAG	0x17
 
-struct oid {
-		/* the OID in human readable format */
-	char *oid;
+struct oid_data {
+	/* the OID in human readable form */
+	char *string;
+	/* the OID in the end-form(includes header) */
+	char *bytes;
+	/* length of the OID in the end-form */
+	size_t length;
 };
 
 struct octet_string {
@@ -45,7 +49,7 @@ struct array_like_sequence {
 };
 
 struct algo {
-	struct oid algo_oid;
+	struct oid_data *algo_oid;
 	struct null a_null;
 };
 
@@ -59,29 +63,30 @@ struct a_file {
 	char *a_hash;
 	char *guid;	/* {C689AAB8-8E78-11D0-8C47-00C04FC295EE} */
 	char *sha1_hash;  /* seems to be the same as a_hash but coded differently */
-
+	
 	struct an_attribute file_attribute;
 	struct an_attribute os_attribute;
-
-	struct oid member_info_oid;
+	
+	//struct oid_data *member_info_oid; //file is a "hot" struct
+	
 	bool is_link;
 };
 
 struct catalog_list_element {
-	struct oid catalog_list_oid;
+	struct oid_data *catalog_list_oid;
 	struct octet_string a_hash;
 	struct utc_time a_time;
-	struct oid catalog_list_member_oid;
-
+	struct oid_data *catalog_list_member_oid;
+	
 	struct an_attribute hardware_id;
 	struct an_attribute os_info;
-
+	
 	int nr_files;
 	struct a_file files[0];
 };
 
 struct cert_trust_list {
-	struct oid cert_trust_oid;
+	struct oid_data *cert_trust_oid;
 	struct catalog_list_element *catalog_list_element;
 };
 
@@ -93,13 +98,44 @@ struct pkcs7_data {
 };
 
 struct pkcs7_toplevel {
-	struct oid signed_data_oid;
+	struct oid_data *signed_data_oid;
 	struct pkcs7_data data;
+};
+
+struct known_oids {
+	//cold, used once (if used)
+	struct oid_data algo_oid;
+	//hot, x2 per file, per HWID and one more
+	struct oid_data attribute_name_value_oid;
+	//cold, used once
+	struct oid_data catalog_list_oid;
+	//cold, used once (now, depends on tree)
+	struct oid_data catalog_list_member_oid;
+	//cold, used once
+	struct oid_data cert_trust_oid;
+	//warm, per file
+	struct oid_data member_info_oid;
+	//cold, used once
+	struct oid_data signed_data_oid;
+	//warm, per file
+	struct oid_data spc_oid;
+	//warm, per file
+	struct oid_data spc_algo_oid;
+	//warm, per file
+	struct oid_data spc_image_data_oid;
+	//warm, per file
+	struct oid_data spc_link_oid;
+};
+
+struct cache {
+	struct known_oids *oids;
 };
 
 size_t buflen = 0;
 size_t bufsz = 0;
 char *buffer = NULL;
+
+struct cache datacache = { 0 };
 
 void __attribute((noreturn)) fatal(const char *msg)
 {
@@ -215,6 +251,31 @@ size_t encode_oid_component(int oc)
 	fatal("Can't encode this OID component\n");
 }
 
+size_t encode_oid_arc_to_cache(int arc, char *buf)
+{
+	if (arc < 0) {
+		fatal("OID component must not be negative.\n");
+	}
+	
+	if (arc < 0x80) {
+		buf[0] = arc;
+		return 1;
+	}
+	if (arc < 0x4000) {
+		buf[0] = ((arc >> 7) & 0x7f) | 0x80 ;
+		buf[1] = arc & 0x7f;
+		return 2;
+	}
+	if (arc < 0x200000) {
+		buf[0] = ((arc >> 14) & 0x7f) | 0x80 ;
+		buf[1] = ((arc >> 7) & 0x7f) | 0x80 ;
+		buf[2] = arc & 0x7f;
+		return 3;
+	}
+	
+	fatal("Can't encode this OID component\n");
+}
+
 size_t encode_oid(char *oid, bool write)
 {
 	char *next;
@@ -222,6 +283,7 @@ size_t encode_oid(char *oid, bool write)
 	int l0, l1, l;
 	
 	size_t (*oid_component_handler)(int) = sizeof_oid_arc;
+	
 	
 	l0 = strtoul(oid, &next, 10);
 	if (l0 == 0 && errno != 0) {
@@ -253,6 +315,44 @@ size_t encode_oid(char *oid, bool write)
 		len += oid_component_handler(l);
 	}
 	return len;
+}
+
+size_t encode_oid_to_cache(char *oid, char *buf, size_t buf_sz)
+{
+	size_t oid_len;
+	char *next;
+	int root, sroot, child;
+	
+	
+	root = strtoul(oid, &next, 10);
+	if (root == 0 && errno != 0) {
+		fatal("could not parse OID element\n");
+	}
+	if (*next != '.') {
+		fatal("Syntax error in OID\n");
+	}
+	sroot = strtoul(next+1, &next, 10);
+	if (sroot == 0 && errno != 0) {
+		fatal("could not parse OID element\n");
+	}
+	if (*next != '.' && *next != '\0') {
+		fatal("Syntax error in OID\n");
+	}
+	oid_len = encode_oid_arc_to_cache(root * 40 + sroot, buf);
+	
+	while (*next != '\0') {
+		if ((oid_len + 3) > buf_sz)
+			fatal("can't encode this OID\n");
+		
+		child = strtoul(next+1, &next, 10);
+		if (child == 0 && errno != 0)
+			fatal("could not parse OID element\n");
+		if (*next != '.' && *next != '\0')
+			fatal("Syntax error in OID\n");
+		
+		oid_len += encode_oid_arc_to_cache(child, buf + oid_len);
+	}
+	return oid_len;
 }
 
 size_t encode_null(bool write)
@@ -420,15 +520,60 @@ size_t encode_string_as_utf16_bmp(const char *s, bool write)
 	fatal("string too long\n");
 }
 
-size_t encode_oid_with_header(struct oid *oid, bool write)
+//for any oids; necessary data is calculated on each request; may be expensive with "hot" oids
+size_t encode_plain_oid_with_header(char *oid, bool write)
 {
-	size_t len = encode_oid(oid->oid, false);
+	size_t len = encode_oid(oid, false);
 	
 	size_t l2 = encode_tag_and_length(OID_TAG, len, write);
 	if (write)
-		return encode_oid(oid->oid, true) + l2;
+		return encode_oid(oid, true) + l2;
 	
 	return len + l2;
+}
+
+//for known oids; necessary data is calculated on first request and cached inside the oid object for further usage
+size_t encode_known_oid_with_header(struct oid_data *oid, bool write)
+{
+	if (oid->string == NULL || *oid->string == '\0')
+		fatal("the string value of the known OID must be not NULL nor empty string");
+	
+	if (oid->bytes == NULL)
+	{
+		// size of this buffer(256) is based on
+		// max length of oid arc in bytes(3 for local encoder) times max known count of arcs(34)
+		// and rounded to nearest power of two
+		char oid_buf[0x100];
+		size_t data_length = encode_oid_to_cache(oid->string, oid_buf, 0x100);
+		if (data_length < 0x80)
+		{
+			oid->length = data_length + 2;
+			oid->bytes = malloc(oid->length);
+			oid->bytes[1] = data_length;
+		}
+		else if (data_length < 0x100)
+		{
+			oid->length = data_length + 3;
+			oid->bytes = malloc(oid->length);
+			oid->bytes[1] = 0x81;	/* 1 more length bytes */
+			oid->bytes[2] = data_length;
+		}
+		else
+		{
+			oid->length = data_length + 4;
+			oid->bytes = malloc(oid->length);
+			oid->bytes[1] = 0x82;	/* 2 more length bytes */
+			oid->bytes[2] = (data_length >> 8) & 0xff;
+			oid->bytes[3] = data_length & 0xff;
+		}
+		oid->bytes[0] = OID_TAG;
+		memcpy(oid->bytes + oid->length - data_length, oid_buf, data_length);
+	}
+	
+	if (write)
+		return append_to_buffer(oid->length, oid->bytes);
+	
+	return oid->length;
 }
 
 size_t encode_sequence(void *s, size_t a_fn(void*, bool), bool write)
@@ -480,10 +625,11 @@ size_t encode_algo(void *p, bool write)
 {
 	struct algo *a = p;
 	size_t length = 0;
-
-	length += encode_oid_with_header(&a->algo_oid, write);
+	
+	length += encode_known_oid_with_header(a->algo_oid, write);
+	//length += encode_known_oid_with_header(&datacache.oids->algo_oid, write);
 	length += encode_null(write);
-
+	
 	return length;
 }
 
@@ -513,15 +659,14 @@ size_t encode_attribute(void *p, bool write)
 {
 	struct an_attribute *a = p;
 	size_t length;
-	struct oid name_value = { "1.3.6.1.4.1.311.12.2.1" };
-
-	length = encode_oid_with_header(&name_value, write);
+	
+	length = encode_known_oid_with_header(&datacache.oids->attribute_name_value_oid, write);
 	if (a->encode_as_set) {
 		length += encode_set(a, encode_attribute_sequence, write);
 	} else {
 		length += encode_as_octet_string(a, encode_attribute_sequence, write);
 	}
-
+	
 	return length;
 }
 
@@ -545,10 +690,10 @@ size_t encode_member_info_oid(void *p, bool write)
 {
 	struct a_file *f = p;
 	size_t length;
-
-	length = encode_oid_with_header(&f->member_info_oid, write);
+	
+	length = encode_known_oid_with_header(&datacache.oids->member_info_oid, write);
 	length += encode_set(f, encode_member_info_sequence, write);
-
+	
 	return length;
 }
 
@@ -573,18 +718,16 @@ size_t encode_spc_image_data(void *p, bool write)
 {
 	struct a_file *f = p;
 	size_t length;
-	struct oid spc_image_data_oid = { "1.3.6.1.4.1.311.2.1.15" };
-
-	length = encode_oid_with_header(&spc_image_data_oid, write);
+	
+	length = encode_known_oid_with_header(&datacache.oids->spc_image_data_oid, write);
 	length += encode_sequence(f, encode_obsolete_image_data, write);
-
+	
 	return length;
 }
 
 size_t encode_spc_link(void *p, bool write)
 {
-	struct oid spc_link_oid = { "1.3.6.1.4.1.311.2.1.25" };
-	size_t length = encode_oid_with_header(&spc_link_oid, write);
+	size_t length = encode_known_oid_with_header(&datacache.oids->spc_link_oid, write);
 	
 	if (!write)
 		return length + 0x12;
@@ -617,12 +760,11 @@ int hexdigit(char c)
 
 size_t encode_spc_algo_oid(void *p, bool write)
 {
-	struct oid spc_algo_oid = { "1.3.14.3.2.26" };
 	size_t length;
-
-	length = encode_oid_with_header(&spc_algo_oid, write);
+	
+	length = encode_known_oid_with_header(&datacache.oids->spc_algo_oid, write);
 	length += encode_null(write);
-
+	
 	return length;
 }
 
@@ -668,13 +810,12 @@ size_t encode_spc_sequence(void *p, bool write)
 
 size_t encode_spc_oid(void *p, bool write)
 {
-	struct oid spc_oid = { "1.3.6.1.4.1.311.2.1.4" };
 	struct a_file *f = p;
 	size_t length;
-
-	length = encode_oid_with_header(&spc_oid, write);
+	
+	length = encode_known_oid_with_header(&datacache.oids->spc_oid, write);
 	length += encode_set(f, encode_spc_sequence, write);
-
+	
 	return length;
 }
 
@@ -719,18 +860,20 @@ size_t encode_catalog_list_member_oid(void *p, bool write)
 {
 	struct catalog_list_element *e = p;
 	size_t length = 0;
-
-	length += encode_oid_with_header(&e->catalog_list_member_oid, write);
+	
+	length += encode_known_oid_with_header(e->catalog_list_member_oid, write);
+	//length += encode_known_oid_with_header(&datacache.oids->catalog_list_member_oid, write);
 	length += encode_null(write);
-
+	
 	return length;
 }
 
 size_t encode_catalog_list_oid(void *p, bool write)
 {
 	struct catalog_list_element *e = p;
-
-	return encode_oid_with_header(&e->catalog_list_oid, write);
+	
+	return encode_known_oid_with_header(e->catalog_list_oid, write);
+	//return encode_known_oid_with_header(&datacache.oids->catalog_list_oid, write);
 }
 
 size_t encode_global_attributes2(void *p, bool write)
@@ -773,10 +916,11 @@ size_t encode_cert_trust_list(void *p, bool write)
 {
 	struct cert_trust_list *c = p;
 	size_t length = 0;
-
-	length += encode_oid_with_header(&c->cert_trust_oid, write);
+	
+	length += encode_known_oid_with_header(c->cert_trust_oid, write);
+	//length += encode_known_oid_with_header(&datacache.oids->cert_trust_oid, write);
 	length += encode_array(c->catalog_list_element, encode_catalog_list_sequence, write);
-
+	
 	return length;
 }
 
@@ -803,12 +947,30 @@ size_t encode_pkcs7_toplevel(void *p, bool write)
 {
 	struct pkcs7_toplevel *s = p;
 	size_t length = 0;
-
-	length += encode_oid_with_header(&s->signed_data_oid, write);
+	
+	length += encode_known_oid_with_header(s->signed_data_oid, write);
+	//length += encode_known_oid_with_header(&datacache.oids->signed_data_oid, write);
 	// length += encode_sequence(&s->data, encode_pkcs7_array, write);
 	length += encode_array(&s->data, encode_pkcs7_sequence, write);
-
+	
 	return length;
+}
+
+void free_allocated(struct pkcs7_toplevel *s)
+{
+	struct oid_data *one_oid = (struct oid_data*)datacache.oids;
+	size_t oids_cnt = sizeof(struct known_oids) / sizeof(struct oid_data);
+	datacache.oids = NULL;
+	while (oids_cnt--)
+	{
+		free(one_oid->bytes);
+		one_oid->bytes = NULL;
+		one_oid->length = 0;
+		++one_oid;
+	}
+	
+	
+	free(s->data.cert_trust_list.catalog_list_element);
 }
 
 void create_binary_tree(void *s)
@@ -817,13 +979,13 @@ void create_binary_tree(void *s)
 	buflen = 0;
 	size_t data_length = encode_pkcs7_toplevel(s, false);
 	bufsz = encode_tag_and_length(SEQUENCE_TAG, data_length, false) + data_length;
-
+	
 	/* place for extra limitation
 	   take a note:
 	     while limitation of the redirection usually not reachable or depends on the target file system
 	     it's much lower for pipes https://unix.stackexchange.com/a/11954
 	*/
-
+	
 	/* create buffer of computed size */
 	buffer = malloc(bufsz);
 	if (buffer == NULL)
@@ -831,7 +993,7 @@ void create_binary_tree(void *s)
 	/* write data to buffer */
 	encode_tag_and_length(SEQUENCE_TAG, data_length, true);
 	encode_pkcs7_toplevel(s, true);
-
+	
 	/* check written data length */
 	if (buflen != bufsz)
 		fatal("length mismatch\n");
@@ -851,7 +1013,7 @@ void parse_file_arg(char *arg, struct a_file *f, char *os_attr)
 	char *s = strdup(arg);
 	char *fname, *hash, *s1;
 	bool is_pe;
-
+	
 	if (s == NULL) {
 		fatal("Out of memory");
 	}
@@ -875,18 +1037,18 @@ void parse_file_arg(char *arg, struct a_file *f, char *os_attr)
 			usage_and_exit();
 		}
 	}
-
+	
 	f->a_hash = hash;
 	f->sha1_hash = hash;
-
+	
 	f->file_attribute.value = fname;
 	f->file_attribute.name = "File";
 	f->os_attribute.value = os_attr;
 	f->os_attribute.name = "OSAttr";
-	f->member_info_oid.oid = "1.3.6.1.4.1.311.12.2.2";
+	//f->member_info_oid.oid = "1.3.6.1.4.1.311.12.2.2";
 	f->file_attribute.encode_as_set = true;
 	f->os_attribute.encode_as_set = true;
-
+	
 	if (is_pe) {
 		f->guid = "{C689AAB8-8E78-11D0-8C47-00C04FC295EE}";
 		f->is_link = false;
@@ -908,13 +1070,13 @@ int main(int argc, char ** argv)
 	// char a_hash[16] = {0x59, 0x72, 0xA5, 0x5B, 0xFE, 0xF3, 0xCD, 0x46, 0x91, 0x3C, 0xEF, 0x00, 0xC7, 0x7A, 0x97, 0x69};
 	char a_hash[16];
 	int i;
-
+	
 	char *os_string = "7X64,8X64,_v100_X64";
 	char *os_attr_string = "2:6.1,2:6.2,2:10.0";
 	char *hardware_id = "windrbd";
 	int nr_files;
 	char c;
-
+	
 	while ((c = getopt(argc, argv, "h:A:O:")) != -1) {
 		switch (c) {
 		case 'h':
@@ -940,16 +1102,11 @@ int main(int argc, char ** argv)
 	}
 	for (i=0;i<sizeof(a_hash);i++)
 		a_hash[i] = i;
-
-	s.signed_data_oid.oid = "1.2.840.113549.1.7.2";
+	
 	s.data.an_int = 1;
-	s.data.algo.algo_oid.oid = "2.16.840.1.101.3.4.2.1";
-	s.data.cert_trust_list.cert_trust_oid.oid = "1.3.6.1.4.1.311.10.1";
-	s.data.cert_trust_list.catalog_list_element->catalog_list_oid.oid = "1.3.6.1.4.1.311.12.1.1";
 	s.data.cert_trust_list.catalog_list_element->a_hash.len = 16;
 	s.data.cert_trust_list.catalog_list_element->a_hash.data = a_hash;
 	s.data.cert_trust_list.catalog_list_element->a_time.date_time = "230823140713Z";
-	s.data.cert_trust_list.catalog_list_element->catalog_list_member_oid.oid = "1.3.6.1.4.1.311.12.1.2";
 	s.data.cert_trust_list.catalog_list_element->hardware_id.name = "HWID1";
 	s.data.cert_trust_list.catalog_list_element->hardware_id.value = hardware_id;
 	s.data.cert_trust_list.catalog_list_element->hardware_id.encode_as_set = false;
@@ -957,17 +1114,45 @@ int main(int argc, char ** argv)
 //	s.data.cert_trust_list.catalog_list_element->os_info.value = "XP_X86,Vista_X86,Vista_X64,7_X86,7_X64,8_X86,8_X64,6_3_X86,6_3_X64,10_X86,10_X64";
 	s.data.cert_trust_list.catalog_list_element->os_info.value = os_string;
 	s.data.cert_trust_list.catalog_list_element->os_info.encode_as_set = false;
-
+	
+	/* init OIDs cache, actual data will be computed on first access per OID */
+	struct known_oids oids = { 0 };
+	datacache.oids = &oids;
+	oids.signed_data_oid.string				= "1.2.840.113549.1.7.2";
+	//{joint-iso-itu-t(2) country(16) us(840) organization(1) gov(101) csor(3) nistAlgorithms(4) hashAlgs(2) sha256(1)}
+	oids.algo_oid.string					= "2.16.840.1.101.3.4.2.1";
+	oids.cert_trust_oid.string				= "1.3.6.1.4.1.311.10.1";
+	oids.catalog_list_oid.string			= "1.3.6.1.4.1.311.12.1.1";
+	oids.catalog_list_member_oid.string		= "1.3.6.1.4.1.311.12.1.2";
+	oids.attribute_name_value_oid.string	= "1.3.6.1.4.1.311.12.2.1";
+	oids.member_info_oid.string				= "1.3.6.1.4.1.311.12.2.2";
+	oids.spc_oid.string						= "1.3.6.1.4.1.311.2.1.4";
+	oids.spc_image_data_oid.string			= "1.3.6.1.4.1.311.2.1.15";
+	oids.spc_link_oid.string				= "1.3.6.1.4.1.311.2.1.25";
+	//{iso(1) identified-organization(3) oiw(14) secsig(3) algorithms(2) sha1(26)}
+	oids.spc_algo_oid.string				= "1.3.14.3.2.26";
+	
+	/* these references should be ok cuz both s and oids created on current stack, so they invalidates together */
+	s.signed_data_oid = &oids.signed_data_oid;
+	s.data.algo.algo_oid = &oids.algo_oid;
+	s.data.cert_trust_list.cert_trust_oid = &oids.cert_trust_oid;
+	s.data.cert_trust_list.catalog_list_element->catalog_list_oid = &oids.catalog_list_oid;
+	s.data.cert_trust_list.catalog_list_element->catalog_list_member_oid = &oids.catalog_list_member_oid;
+	
 	s.data.cert_trust_list.catalog_list_element->nr_files = nr_files;
-
+	
 	for (i=0;i<nr_files;i++) {
 		parse_file_arg(argv[i+optind], &s.data.cert_trust_list.catalog_list_element->files[i], os_attr_string);
 	}
-
-
-
+	
+	
+	
 	/* generate binary DER */
 	create_binary_tree(&s);
+	
+	/* free the memory allocated on the heap, not necessary - OS should care about this, mostly it's as an indicator of stack refs */
+	free_allocated(&s);
+	
 	/* and write to stdout or so ... */
 	fwrite(buffer, buflen, 1, stdout);
 }
