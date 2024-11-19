@@ -527,50 +527,21 @@ size_t encode_string_as_utf16_bmp(const char *s, bool write)
 	fatal("string too long\n");
 }
 
-size_t encode_sequence(void *s, size_t a_fn(void*, bool), bool write)
+
+//generic data encoder
+size_t encode_tagged_data(char tag, void *s, size_t a_fn(void*, bool), bool write)
 {
-	size_t length = a_fn(s, false);
+	size_t data_length = a_fn(s, false);
 	
-	size_t l2 = encode_tag_and_length(SEQUENCE_TAG, length, write);
+	size_t head_length = encode_tag_and_length(tag, data_length, write);
 	if (write)
-		return a_fn(s, true) + l2;
+		return a_fn(s, true) + head_length;
 	
-	return length + l2;
+	return data_length + head_length;
 }
 
-	/* TODO: differs only in tag value ... */
-size_t encode_set(void *s, size_t a_fn(void*, bool), bool write)
-{
-	size_t length = a_fn(s, false);
-	
-	size_t l2 = encode_tag_and_length(SET_TAG, length, write);
-	if (write)
-		return a_fn(s, true) + l2;
-	
-	return length + l2;
-}
 
-size_t encode_array(void *s, size_t a_fn(void*, bool), bool write)
-{
-	size_t length = a_fn(s, false);
-	
-	size_t l2 = encode_tag_and_length(ARRAY_TAG, length, write);
-	if (write)
-		return a_fn(s, true) + l2;
-	
-	return length + l2;
-}
-
-size_t encode_as_octet_string(void *s, size_t a_fn(void*, bool), bool write)
-{
-	size_t length = a_fn(s, false);
-	
-	size_t l2 = encode_tag_and_length(OCTET_STRING_TAG, length, write);
-	if (write)
-		return a_fn(s, true) + l2;
-	
-	return length + l2;
-}
+//hi-level encoders
 
 size_t encode_algo(void *p, bool write)
 {
@@ -586,7 +557,7 @@ size_t encode_algo(void *p, bool write)
 
 size_t encode_algo_sequence(void *p, bool write)
 {
-	return encode_sequence(p, encode_algo, write);
+	return encode_tagged_data(SEQUENCE_TAG, p, encode_algo, write);
 }
 
 size_t encode_attribute_name_and_value(void *p, bool write)
@@ -603,20 +574,16 @@ size_t encode_attribute_name_and_value(void *p, bool write)
 
 size_t encode_attribute_sequence(void *p, bool write)
 {
-	return encode_sequence(p, encode_attribute_name_and_value, write);
+	return encode_tagged_data(SEQUENCE_TAG, p, encode_attribute_name_and_value, write);
 }
 
 size_t encode_attribute(void *p, bool write)
 {
-	struct an_attribute *a = p;
-	size_t length;
+	struct an_attribute *attr = p;
+	size_t length = 0;
 	
-	length = encode_known_oid_with_header(&datacache.oids->attribute_name_value_oid, write);
-	if (a->encode_as_set) {
-		length += encode_set(a, encode_attribute_sequence, write);
-	} else {
-		length += encode_as_octet_string(a, encode_attribute_sequence, write);
-	}
+	length += encode_known_oid_with_header(&datacache.oids->attribute_name_value_oid, write);
+	length += encode_tagged_data(attr->encode_as_set? SET_TAG : OCTET_STRING_TAG, p, encode_attribute_sequence, write);
 	
 	return length;
 }
@@ -634,16 +601,15 @@ size_t encode_member_info(void *p, bool write)
 
 size_t encode_member_info_sequence(void *p, bool write)
 {
-	return encode_sequence(p, encode_member_info, write);
+	return encode_tagged_data(SEQUENCE_TAG, p, encode_member_info, write);
 }
 
 size_t encode_member_info_oid(void *p, bool write)
 {
-	struct a_file *f = p;
-	size_t length;
+	size_t length = 0;
 	
-	length = encode_known_oid_with_header(&datacache.oids->member_info_oid, write);
-	length += encode_set(f, encode_member_info_sequence, write);
+	length += encode_known_oid_with_header(&datacache.oids->member_info_oid, write);
+	length += encode_tagged_data(SET_TAG, p, encode_member_info_sequence, write);
 	
 	return length;
 }
@@ -724,7 +690,7 @@ size_t encode_spc_algo(void *p, bool write)
 	struct a_file *file = p;
 	size_t length = 0;
 	
-	length += encode_sequence(p, encode_spc_algo_oid, write);
+	length += encode_tagged_data(SEQUENCE_TAG, p, encode_spc_algo_oid, write);
 	length += encode_tagged_string(OCTET_STRING_TAG, SHA1_BYTE_LEN, file->sha1_bytes, write);
 	
 	return length;
@@ -735,15 +701,15 @@ size_t encode_spc(void *p, bool write)
 	struct a_file *file = p;
 	size_t length = 0;
 	
-	length += encode_sequence(p, file->is_link? encode_spc_link : encode_spc_image_data, write);
-	length += encode_sequence(p, encode_spc_algo, write);
-
+	length += encode_tagged_data(SEQUENCE_TAG, p, file->is_link? encode_spc_link : encode_spc_image_data, write);
+	length += encode_tagged_data(SEQUENCE_TAG, p, encode_spc_algo, write);
+	
 	return length;
 }
 
 size_t encode_spc_sequence(void *p, bool write)
 {
-	return encode_sequence(p, encode_spc, write);
+	return encode_tagged_data(SEQUENCE_TAG, p, encode_spc, write);
 }
 
 size_t encode_spc_oid(void *p, bool write)
@@ -751,45 +717,45 @@ size_t encode_spc_oid(void *p, bool write)
 	size_t length = 0;
 	
 	length += encode_known_oid_with_header(&datacache.oids->spc_oid, write);
-	length += encode_set(p, encode_spc_sequence, write);
+	length += encode_tagged_data(SET_TAG, p, encode_spc_sequence, write);
 	
 	return length;
 }
 
 size_t encode_file_attributes(void *p, bool write)
 {
-	struct a_file *f = p;
-	size_t length;
-
-	length = encode_sequence(&f->file_attribute, encode_attribute, write);
-	length += encode_sequence(&f->os_attribute, encode_attribute, write);
-	length += encode_sequence(f, encode_spc_oid, write);
-	length += encode_sequence(f, encode_member_info_oid, write);
-
+	struct a_file *file = p;
+	size_t length = 0;
+	
+	length += encode_tagged_data(SEQUENCE_TAG, &file->file_attribute, encode_attribute, write);
+	length += encode_tagged_data(SEQUENCE_TAG, &file->os_attribute, encode_attribute, write);
+	length += encode_tagged_data(SEQUENCE_TAG, p, encode_spc_oid, write);
+	length += encode_tagged_data(SEQUENCE_TAG, p, encode_member_info_oid, write);
+	
 	return length;
 }
 
 size_t encode_one_file(void *p, bool write)
 {
-	struct a_file *f = p;
-	size_t length;
+	struct a_file *file = p;
+	size_t length = 0;
 	
-	length = encode_string_as_utf16(f->sha1_str, write);
-	length += encode_set(f, encode_file_attributes, write);
+	length += encode_string_as_utf16(file->sha1_str, write);
+	length += encode_tagged_data(SET_TAG, p, encode_file_attributes, write);
 	
 	return length;
 }
 
 size_t encode_files(void *p, bool write)
 {
-	struct catalog_list_element *e = p;
+	struct catalog_list_element *elem = p;
 	size_t length = 0;
 	int i;
-
-	for (i=0;i<e->nr_files;i++) {
-		length += encode_sequence(&e->files[i], encode_one_file, write);
+	
+	for (i = 0; i < elem->nr_files; i++) {
+		length += encode_tagged_data(SEQUENCE_TAG, &elem->files[i], encode_one_file, write);
 	}
-
+	
 	return length;
 }
 
@@ -815,80 +781,80 @@ size_t encode_catalog_list_oid(void *p, bool write)
 
 size_t encode_global_attributes2(void *p, bool write)
 {
-	struct catalog_list_element *e = p;
+	struct catalog_list_element *elem = p;
 	size_t length = 0;
-
-	length += encode_sequence(&e->os_info, encode_attribute, write);
-	length += encode_sequence(&e->hardware_id, encode_attribute, write);
-
+	
+	length += encode_tagged_data(SEQUENCE_TAG, &elem->os_info, encode_attribute, write);
+	length += encode_tagged_data(SEQUENCE_TAG, &elem->hardware_id, encode_attribute, write);
+	
 	return length;
 }
 
 size_t encode_global_attributes(void *p, bool write)
 {
-	return encode_sequence(p, encode_global_attributes2, write);
+	return encode_tagged_data(SEQUENCE_TAG, p, encode_global_attributes2, write);
 }
 
 size_t encode_catalog_list_elements(void *p, bool write)
 {
-	struct catalog_list_element *e = p;
+	struct catalog_list_element *elem = p;
 	size_t length = 0;
-
-	length += encode_sequence(e, encode_catalog_list_oid, write);
-	length += encode_tagged_string(OCTET_STRING_TAG, 16, e->a_hash, write);
-	length += encode_tagged_string(UTC_TIME_TAG, 13, e->a_time, write);
-	length += encode_sequence(p, encode_catalog_list_member_oid, write);
-	length += encode_sequence(p, encode_files, write);
-	length += encode_array(p, encode_global_attributes, write);
-
+	
+	length += encode_tagged_data(SEQUENCE_TAG, p, encode_catalog_list_oid, write);
+	length += encode_tagged_string(OCTET_STRING_TAG, 16, elem->a_hash, write);
+	length += encode_tagged_string(UTC_TIME_TAG, 13, elem->a_time, write);
+	length += encode_tagged_data(SEQUENCE_TAG, p, encode_catalog_list_member_oid, write);
+	length += encode_tagged_data(SEQUENCE_TAG, p, encode_files, write);
+	length += encode_tagged_data(ARRAY_TAG, p, encode_global_attributes, write);
+	
 	return length;
 }
 
 size_t encode_catalog_list_sequence(void *p, bool write)
 {
-	return encode_sequence(p, encode_catalog_list_elements, write);
+	return encode_tagged_data(SEQUENCE_TAG, p, encode_catalog_list_elements, write);
 }
 
 size_t encode_cert_trust_list(void *p, bool write)
 {
-	struct cert_trust_list *c = p;
+	struct cert_trust_list *cert = p;
 	size_t length = 0;
 	
-	length += encode_known_oid_with_header(c->cert_trust_oid, write);
+	length += encode_known_oid_with_header(cert->cert_trust_oid, write);
 	//length += encode_known_oid_with_header(&datacache.oids->cert_trust_oid, write);
-	length += encode_array(c->catalog_list_element, encode_catalog_list_sequence, write);
+	length += encode_tagged_data(ARRAY_TAG, cert->catalog_list_element, encode_catalog_list_sequence, write);
 	
 	return length;
 }
 
 size_t encode_pkcs7_data(void *p, bool write)
 {
-	struct pkcs7_data *d = p;
+	struct pkcs7_data *data = p;
 	size_t length = 0;
-
-	length += encode_integer(d->an_int, write);
-	// length += encode_set(&d->algo, encode_algo_sequence, write);
+	
+	length += encode_integer(data->an_int, write);
+	//length += encode_tagged_data(SET_TAG, &data->algo, encode_algo_sequence, write);
 	length += encode_empty_set(write);
-	length += encode_sequence(&d->cert_trust_list, encode_cert_trust_list, write);
+	length += encode_tagged_data(SEQUENCE_TAG, &data->cert_trust_list, encode_cert_trust_list, write);
 	length += encode_empty_set(write);
-
+	
 	return length;
 }
 
 size_t encode_pkcs7_sequence(void *p, bool write)
 {
-	return encode_sequence(p, encode_pkcs7_data, write);
+	return encode_tagged_data(SEQUENCE_TAG, p, encode_pkcs7_data, write);
 }
 
 size_t encode_pkcs7_toplevel(void *p, bool write)
 {
-	struct pkcs7_toplevel *s = p;
+	struct pkcs7_toplevel *sdat = p;
 	size_t length = 0;
 	
-	length += encode_known_oid_with_header(s->signed_data_oid, write);
+	length += encode_known_oid_with_header(sdat->signed_data_oid, write);
 	//length += encode_known_oid_with_header(&datacache.oids->signed_data_oid, write);
-	// length += encode_sequence(&s->data, encode_pkcs7_array, write);
-	length += encode_array(&s->data, encode_pkcs7_sequence, write);
+	//length += encode_tagged_data(SEQUENCE_TAG, &sdat->data, encode_pkcs7_array, write);
+	length += encode_tagged_data(ARRAY_TAG, &sdat->data, encode_pkcs7_sequence, write);
 	
 	return length;
 }
