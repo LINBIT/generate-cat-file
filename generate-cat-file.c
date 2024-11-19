@@ -18,6 +18,10 @@
 #define BMP_STRING_TAG	0x1E
 #define UTC_TIME_TAG	0x17
 
+#define SHA1_BYTE_LEN	20
+#define SHA1_STR_LEN	SHA1_BYTE_LEN * 2
+
+
 struct oid_data {
 	/* the OID in human readable form */
 	char *string;
@@ -60,9 +64,9 @@ struct an_attribute {
 };
 
 struct a_file {
-	char *a_hash;
 	char *guid;	/* {C689AAB8-8E78-11D0-8C47-00C04FC295EE} */
-	char *sha1_hash;  /* seems to be the same as a_hash but coded differently */
+	char sha1_str[SHA1_STR_LEN + 1]; //sha1 string
+	char sha1_bytes[SHA1_BYTE_LEN]; //sha1 bytes in big endian order
 	
 	struct an_attribute file_attribute;
 	struct an_attribute os_attribute;
@@ -771,20 +775,12 @@ size_t encode_spc_algo_oid(void *p, bool write)
 size_t encode_spc_algo(void *p, bool write)
 {
 	struct a_file *f = p;
-	char sha1[20];
-	int i;
-	struct octet_string oc;
-	size_t length;
-
-	length = encode_sequence(f, encode_spc_algo_oid, write);
-	for (i=0;i<sizeof(sha1);i++) {
-		sha1[i] = hexdigit(f->sha1_hash[i*2])*16 + hexdigit(f->sha1_hash[i*2+1]);
-	}
-
-	oc.len = 20;
-	oc.data = sha1;
+	struct octet_string oc = { SHA1_BYTE_LEN, f->sha1_bytes };
+	size_t length = 0;
+	
+	length += encode_sequence(f, encode_spc_algo_oid, write);
 	length += encode_octet_string(&oc, write);
-
+	
 	return length;
 }
 
@@ -793,7 +789,7 @@ size_t encode_spc(void *p, bool write)
 	struct a_file *f = p;
 	size_t length;
 
-	if (!f->is_link) {
+	if (f->is_link == false) {
 		length = encode_sequence(p, encode_spc_image_data, write);
 	} else {
 		length = encode_sequence(p, encode_spc_link, write);
@@ -836,10 +832,10 @@ size_t encode_one_file(void *p, bool write)
 {
 	struct a_file *f = p;
 	size_t length;
-
-	length = encode_string_as_utf16(f->a_hash, write);
+	
+	length = encode_string_as_utf16(f->sha1_str, write);
 	length += encode_set(f, encode_file_attributes, write);
-
+	
 	return length;
 }
 
@@ -1010,51 +1006,63 @@ void __attribute((noreturn)) usage_and_exit(void)
 
 void parse_file_arg(char *arg, struct a_file *f, char *os_attr)
 {
-	char *s = strdup(arg);
-	char *fname, *hash, *s1;
-	bool is_pe;
+	char *s = arg;
+	char *fname, *hash;
+	int fname_len;
 	
-	if (s == NULL) {
-		fatal("Out of memory");
-	}
-	fname = s;
-	for (s1=s;*s1 && *s1 != ':';s1++) ;
-	if (!*s1) {
+	for (; *s && *s != ':'; ++s) ;
+	if (!*s) {
 		usage_and_exit();
 	}
-	*s1 = '\0';
-	s1++;
-	hash = s1;
-	for (;*s1 && *s1 != ':';s1++) ;
-	if (!*s1) {
-		is_pe = false;
-	} else {
-		*s1 = '\0';
-		s1++;
-		if (strcmp("PE", s1) == 0) {
-			is_pe = true;
-		} else {
-			usage_and_exit();
-		}
+	fname_len = s - arg;
+	if (fname_len == 0) {
+		fatal("file name can't be empty");
 	}
 	
-	f->a_hash = hash;
-	f->sha1_hash = hash;
+	hash = ++s;
 	
-	f->file_attribute.value = fname;
+	for (; *s && *s != ':'; ++s) ;
+	if (s - hash != SHA1_STR_LEN) {
+		fatal("unsupported hash, sha1 expected");
+	}
+	
+	if (*s)
+	{
+		if (strcmp(":PE", s)) //if not equals
+			usage_and_exit();
+		
+		f->is_link = false;
+	}
+	else
+		f->is_link = true;
+		
+	
+	fname = malloc(fname_len + 1);
+	if (fname == NULL) {
+		fatal("out of memory");
+	}
+	memcpy(fname, arg, fname_len);
+	fname[fname_len] = '\0';
+	
+	memcpy(f->sha1_str, hash, SHA1_STR_LEN);
+	f->sha1_str[SHA1_STR_LEN] = '\0';
+	for (int i = 0, j = 0; i < SHA1_BYTE_LEN; ++i, j += 2) {
+		f->sha1_bytes[i] = (hexdigit(hash[j]) << 4) + hexdigit(hash[j + 1]);
+	}
+	
 	f->file_attribute.name = "File";
-	f->os_attribute.value = os_attr;
-	f->os_attribute.name = "OSAttr";
-	//f->member_info_oid.oid = "1.3.6.1.4.1.311.12.2.2";
+	f->file_attribute.value = fname;
 	f->file_attribute.encode_as_set = true;
+	f->os_attribute.name = "OSAttr";
+	f->os_attribute.value = os_attr;
 	f->os_attribute.encode_as_set = true;
 	
-	if (is_pe) {
+	//f->member_info_oid.oid = "1.3.6.1.4.1.311.12.2.2";
+	
+	if (f->is_link == false) {
 		f->guid = "{C689AAB8-8E78-11D0-8C47-00C04FC295EE}";
-		f->is_link = false;
 	} else {
 		f->guid = "{DE351A42-8E59-11D0-8C47-00C04FC295EE}";
-		f->is_link = true;
 	}
 }
 
