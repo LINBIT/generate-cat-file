@@ -701,54 +701,54 @@ size_t encode_member_info_oid(void *p, bool write)
 	return length;
 }
 
-size_t encode_obsolete_image_data(void *p, bool write)
-{
-	if (!write)
-		return 0x26;
-	
-	char image_data[0x26] = { 0x03, 0x02, 0x05, 0xA0, 0xA0, 0x20, 0xA2, 0x1E, 0x80, 0x1C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x4F, 0x00, 0x62, 0x00, 0x73, 0x00, 0x6F, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x74, 0x00, 0x65, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E };
-//	char image_data[0x18] = { 0x03, 0x02, 0x05, 0xA0, 0xA0, 0x12, 0xA2, 0x10, 0x80, 0x0E, 0x00, 0x5A, 0x00, 0x61, 0x00, 0x6B, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x62, 0x00, 0x74 };
-
-// 03 02 05 A0 A0 12 A2
-// 10 80 0E 00 7A 00 61 00  6B 00 6C 00 65 00 62 00
-// 74 30 21 30 09 06 05 2B
-// zaklebt: hacked catgen
-// 007A0061006B006C006500620074
-	
-	return append_to_buffer(sizeof(image_data), image_data);
-}
-
 size_t encode_spc_image_data(void *p, bool write)
 {
-	struct a_file *f = p;
-	size_t length;
+	size_t length = encode_known_oid_with_header(&datacache.oids->spc_image_data_oid, write);
 	
-	length = encode_known_oid_with_header(&datacache.oids->spc_image_data_oid, write);
-	length += encode_sequence(f, encode_obsolete_image_data, write);
+	//*
+	if (!write)
+		return length + 0x28;
 	
-	return length;
+	// <<<obsolete>>>: vanila         vv                                  vv          vv          vv |  value utf-16-bmp, to the end
+	char image_data[0x28] = { 0x30, 0x26, 0x03, 0x02, 0x05, 0xA0, 0xA0, 0x20, 0xA2, 0x1E, 0x80, 0x1C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x4F, 0x00, 0x62, 0x00, 0x73, 0x00, 0x6F, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x74, 0x00, 0x65, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E };
+	
+	return 
+		length + append_to_buffer(sizeof(image_data), image_data);
+	/*/
+	if (!write)
+		return length + 0x1A;
+	
+	// zaklebt: hacked catgen         vv                                  vv          vv          vv |  value utf-16-bmp, to the end
+	char image_data[0x1A] = { 0x30, 0x18, 0x03, 0x02, 0x05, 0xA0, 0xA0, 0x12, 0xA2, 0x10, 0x80, 0x0E, 0x00, 0x5A, 0x00, 0x61, 0x00, 0x6B, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x62, 0x00, 0x74 };
+	
+	return 
+		length + append_to_buffer(sizeof(image_data), image_data);
+	/**/
 }
 
 size_t encode_spc_link(void *p, bool write)
 {
 	size_t length = encode_known_oid_with_header(&datacache.oids->spc_link_oid, write);
 	
+	//*
 	if (!write)
-		return length + 0x12;
+		return length + 0x20;
 	
-/*	char link_data[0x20] = {
-		0xA2, 0x1E, 0x80, 0x1C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x3C,
-		0x00, 0x4F, 0x00, 0x62, 0x00, 0x73, 0x00, 0x6F, 0x00, 0x6C,
-		0x00, 0x65, 0x00, 0x74, 0x00, 0x65, 0x00, 0x3E, 0x00, 0x3E,
-		0x00, 0x3E };
-*/
-	char link_data[0x12] = { 0xA2, 0x10, 0x80, 0x0E, 0x00, 0x7A, 0x00, 0x61, 0x00, 0x6B, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x62, 0x00, 0x74 };
-	
-// A2 10 80 0E 00 7A
-// 00 61 00 6B 00 6C 00 65  00 62 00 74 
+	// <<<obsolete>>>: vanila        vv          vv |  value utf-16-bmp, to the end
+	char link_data[0x20] = { 0xA2, 0x1E, 0x80, 0x1C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x4F, 0x00, 0x62, 0x00, 0x73, 0x00, 0x6F, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x74, 0x00, 0x65, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E };
 	
 	return
 		length + append_to_buffer(sizeof(link_data), link_data);
+	/*/
+	if (!write)
+		return length + 0x12;
+	
+	// zaklebt: hacked catgen        vv          vv |  value utf-16-bmp, to the end
+	char link_data[0x12] = { 0xA2, 0x10, 0x80, 0x0E, 0x00, 0x7A, 0x00, 0x61, 0x00, 0x6B, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x62, 0x00, 0x74 };
+	
+	return
+		length + append_to_buffer(sizeof(link_data), link_data);
+	/**/
 }
 
 int hexdigit(char c)
@@ -764,9 +764,9 @@ int hexdigit(char c)
 
 size_t encode_spc_algo_oid(void *p, bool write)
 {
-	size_t length;
+	size_t length = 0;
 	
-	length = encode_known_oid_with_header(&datacache.oids->spc_algo_oid, write);
+	length += encode_known_oid_with_header(&datacache.oids->spc_algo_oid, write);
 	length += encode_null(write);
 	
 	return length;
@@ -774,11 +774,11 @@ size_t encode_spc_algo_oid(void *p, bool write)
 
 size_t encode_spc_algo(void *p, bool write)
 {
-	struct a_file *f = p;
-	struct octet_string oc = { SHA1_BYTE_LEN, f->sha1_bytes };
+	struct a_file *file = p;
+	struct octet_string oc = { SHA1_BYTE_LEN, file->sha1_bytes };
 	size_t length = 0;
 	
-	length += encode_sequence(f, encode_spc_algo_oid, write);
+	length += encode_sequence(p, encode_spc_algo_oid, write);
 	length += encode_octet_string(&oc, write);
 	
 	return length;
@@ -786,14 +786,10 @@ size_t encode_spc_algo(void *p, bool write)
 
 size_t encode_spc(void *p, bool write)
 {
-	struct a_file *f = p;
-	size_t length;
-
-	if (f->is_link == false) {
-		length = encode_sequence(p, encode_spc_image_data, write);
-	} else {
-		length = encode_sequence(p, encode_spc_link, write);
-	}
+	struct a_file *file = p;
+	size_t length = 0;
+	
+	length += encode_sequence(p, file->is_link? encode_spc_link : encode_spc_image_data, write);
 	length += encode_sequence(p, encode_spc_algo, write);
 
 	return length;
@@ -806,11 +802,10 @@ size_t encode_spc_sequence(void *p, bool write)
 
 size_t encode_spc_oid(void *p, bool write)
 {
-	struct a_file *f = p;
-	size_t length;
+	size_t length = 0;
 	
-	length = encode_known_oid_with_header(&datacache.oids->spc_oid, write);
-	length += encode_set(f, encode_spc_sequence, write);
+	length += encode_known_oid_with_header(&datacache.oids->spc_oid, write);
+	length += encode_set(p, encode_spc_sequence, write);
 	
 	return length;
 }
