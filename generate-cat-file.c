@@ -726,10 +726,27 @@ size_t encode_file_attributes(void *p, bool write)
 	struct a_file *file = p;
 	size_t length = 0;
 	
+	/*
+	//initial order
 	length += encode_tagged_data(SEQUENCE_TAG, &file->file_attribute, encode_attribute, write);
 	length += encode_tagged_data(SEQUENCE_TAG, &file->os_attribute, encode_attribute, write);
 	length += encode_tagged_data(SEQUENCE_TAG, p, encode_spc_oid, write);
 	length += encode_tagged_data(SEQUENCE_TAG, p, encode_member_info_oid, write);
+	/*/
+	//Inf2Cat like order
+	length += encode_tagged_data(SEQUENCE_TAG, &file->os_attribute, encode_attribute, write);
+	length += encode_tagged_data(SEQUENCE_TAG, &file->file_attribute, encode_attribute, write);
+	if (file->is_link)
+	{
+		length += encode_tagged_data(SEQUENCE_TAG, p, encode_spc_oid, write);
+		length += encode_tagged_data(SEQUENCE_TAG, p, encode_member_info_oid, write);
+	}
+	else
+	{
+		length += encode_tagged_data(SEQUENCE_TAG, p, encode_member_info_oid, write);
+		length += encode_tagged_data(SEQUENCE_TAG, p, encode_spc_oid, write);
+	}
+	/**/
 	
 	return length;
 }
