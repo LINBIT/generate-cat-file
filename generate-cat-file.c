@@ -8,19 +8,19 @@
 
 /* DER encoding */
 
-#define SEQUENCE_TAG	0x30
-#define SET_TAG		0x31
-#define ARRAY_TAG	0xA0
-#define OID_TAG		0x06
-#define NULL_TAG	0x05
-#define INTEGER_TAG	0x02
-#define OCTET_STRING_TAG	0x04
-#define BMP_STRING_TAG	0x1E
-#define UTC_TIME_TAG	0x17
+#define INTEGER_TAG         0x02
+#define OCTET_STRING_TAG    0x04
+#define NULL_TAG            0x05
+#define OID_TAG             0x06
+#define UTC_TIME_TAG        0x17
+#define BMP_STRING_TAG      0x1E
+#define SEQUENCE_TAG        0x30  //sub-elements must appear in the definition order
+#define SET_TAG             0x31  //sub-elements may appear in any order, regardless of the definition
+#define ARRAY_TAG           0xA0
 
-#define SHA1_BYTE_LEN	20
-#define SHA1_STR_LEN	SHA1_BYTE_LEN * 2
-#define UTF16_MAX_LEN	1000
+#define SHA1_BYTE_LEN   20
+#define SHA1_STR_LEN    SHA1_BYTE_LEN * 2
+#define UTF16_MAX_LEN   1000
 
 
 //kind of interface for linked-list-node-like structs
@@ -104,10 +104,10 @@ struct cert_trust_list {
 };
 
 struct pkcs7_data {
-	int an_int;
+	struct cert_trust_list cert_trust_list;
 	/* empty set: using SHA-1 which is default */
 	struct algo algo;
-	struct cert_trust_list cert_trust_list;
+	int an_int;
 };
 
 struct pkcs7_toplevel {
@@ -116,28 +116,28 @@ struct pkcs7_toplevel {
 };
 
 struct known_oids {
+	//cold, used once
+	struct oid_data signed_data_oid;
 	//cold, used once (if used)
 	struct oid_data algo_oid;
-	//hot, x2 per file, per HWID and one more
-	struct oid_data attribute_name_value_oid;
+	//cold, used once
+	struct oid_data cert_trust_oid;
 	//cold, used once
 	struct oid_data catalog_list_oid;
 	//cold, used once (now, depends on tree)
 	struct oid_data catalog_list_member_oid;
-	//cold, used once
-	struct oid_data cert_trust_oid;
+	//hot, x2 per file, per HWID and one more
+	struct oid_data attribute_name_value_oid;
 	//warm, per file
 	struct oid_data member_info_oid;
-	//cold, used once
-	struct oid_data signed_data_oid;
 	//warm, per file
 	struct oid_data spc_oid;
-	//warm, per file
-	struct oid_data spc_algo_oid;
 	//warm, per file
 	struct oid_data spc_image_data_oid;
 	//warm, per file
 	struct oid_data spc_link_oid;
+	//warm, per file
+	struct oid_data spc_algo_oid;
 };
 
 struct cache {
@@ -879,11 +879,11 @@ size_t encode_pkcs7_toplevel(void *p, bool write)
 	return length;
 }
 
-void free_allocated(struct pkcs7_toplevel *s)
+void free_allocated(struct pkcs7_toplevel *sdat)
 {
-	struct a_file *next_file = s->data.cert_trust_list.catalog_list_element->files;
+	struct a_file *next_file = sdat->data.cert_trust_list.catalog_list_element->files;
 	struct a_file *this_file;
-	s->data.cert_trust_list.catalog_list_element->files = NULL;
+	sdat->data.cert_trust_list.catalog_list_element->files = NULL;
 	while (next_file)
 	{
 		this_file = next_file;
@@ -906,14 +906,14 @@ void free_allocated(struct pkcs7_toplevel *s)
 	}
 	
 	
-	free(s->data.cert_trust_list.catalog_list_element);
+	free(sdat->data.cert_trust_list.catalog_list_element);
 }
 
-void create_binary_tree(void *s)
+void create_binary_tree(struct pkcs7_toplevel *sdat)
 {
 	/* compute sufficient buffer size */
 	buflen = 0;
-	size_t data_length = encode_pkcs7_toplevel(s, false);
+	size_t data_length = encode_pkcs7_toplevel(sdat, false);
 	bufsz = encode_tag_and_length(SEQUENCE_TAG, data_length, false) + data_length;
 	
 	/* place for extra limitation
@@ -928,7 +928,7 @@ void create_binary_tree(void *s)
 		fatal("out of memory");
 	/* write data to buffer */
 	encode_tag_and_length(SEQUENCE_TAG, data_length, true);
-	encode_pkcs7_toplevel(s, true);
+	encode_pkcs7_toplevel(sdat, true);
 	
 	/* check written data length */
 	if (buflen != bufsz)
@@ -1027,10 +1027,13 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct a_file **
 	}
 }
 
-int main(int argc, char ** argv)
+int main(int argc, char **argv)
 {
 	struct pkcs7_toplevel s = { 0 };
-	size_t len;
+	struct known_oids oids = { 0 };
+	
+	struct a_file *files = NULL;
+	
 	/* initialize data structure */
 //	char a_hash[16] = {0xDD, 0x43, 0x67, 0xE3, 0x2B, 0xAB, 0xE1, 0x44, 0xB7, 0xCB, 0xEC, 0x31, 0xCE, 0xB9, 0xD5, 0xA6};
 //	char a_hash[16] = {0xEF, 0xAB, 0xFC, 0x01, 0x4F, 0xD8, 0x47, 0x42, 0xA0, 0x0B, 0x7C, 0x78, 0x8E, 0x6D, 0xD1, 0xC1};
@@ -1043,7 +1046,6 @@ int main(int argc, char ** argv)
 	char *os_string = "7X64,8X64,_v100_X64";
 	char *os_attr_string = "2:6.1,2:6.2,2:10.0";
 	char *hardware_id = "windrbd";
-	struct a_file *files = NULL;
 	char c;
 	
 	while ((c = getopt(argc, argv, "h:A:O:")) != -1) {
@@ -1069,7 +1071,7 @@ int main(int argc, char ** argv)
 	
 	s.data.cert_trust_list.catalog_list_element = malloc(sizeof(struct catalog_list_element));
 	if (s.data.cert_trust_list.catalog_list_element == NULL) {
-		fatal("Out of memory");
+		fatal("out of memory");
 	}
 	for (i=0;i<sizeof(a_hash);i++)
 		a_hash[i] = i;
@@ -1087,21 +1089,20 @@ int main(int argc, char ** argv)
 	s.data.cert_trust_list.catalog_list_element->os_info.encode_as_set = false;
 	
 	/* init OIDs cache, actual data will be computed on first access per OID */
-	struct known_oids oids = { 0 };
 	datacache.oids = &oids;
-	oids.signed_data_oid.string				= "1.2.840.113549.1.7.2";
+	oids.signed_data_oid.string             = "1.2.840.113549.1.7.2";
 	//{joint-iso-itu-t(2) country(16) us(840) organization(1) gov(101) csor(3) nistAlgorithms(4) hashAlgs(2) sha256(1)}
-	oids.algo_oid.string					= "2.16.840.1.101.3.4.2.1";
-	oids.cert_trust_oid.string				= "1.3.6.1.4.1.311.10.1";
-	oids.catalog_list_oid.string			= "1.3.6.1.4.1.311.12.1.1";
-	oids.catalog_list_member_oid.string		= "1.3.6.1.4.1.311.12.1.2";
-	oids.attribute_name_value_oid.string	= "1.3.6.1.4.1.311.12.2.1";
-	oids.member_info_oid.string				= "1.3.6.1.4.1.311.12.2.2";
-	oids.spc_oid.string						= "1.3.6.1.4.1.311.2.1.4";
-	oids.spc_image_data_oid.string			= "1.3.6.1.4.1.311.2.1.15";
-	oids.spc_link_oid.string				= "1.3.6.1.4.1.311.2.1.25";
+	oids.algo_oid.string                    = "2.16.840.1.101.3.4.2.1";
+	oids.cert_trust_oid.string              = "1.3.6.1.4.1.311.10.1";
+	oids.catalog_list_oid.string            = "1.3.6.1.4.1.311.12.1.1";
+	oids.catalog_list_member_oid.string     = "1.3.6.1.4.1.311.12.1.2";
+	oids.attribute_name_value_oid.string    = "1.3.6.1.4.1.311.12.2.1";
+	oids.member_info_oid.string             = "1.3.6.1.4.1.311.12.2.2";
+	oids.spc_oid.string                     = "1.3.6.1.4.1.311.2.1.4";
+	oids.spc_image_data_oid.string          = "1.3.6.1.4.1.311.2.1.15";
+	oids.spc_link_oid.string                = "1.3.6.1.4.1.311.2.1.25";
 	//{iso(1) identified-organization(3) oiw(14) secsig(3) algorithms(2) sha1(26)}
-	oids.spc_algo_oid.string				= "1.3.14.3.2.26";
+	oids.spc_algo_oid.string                = "1.3.14.3.2.26";
 	
 	/* these references should be ok cuz both s and oids created on current stack, so they invalidates together */
 	s.signed_data_oid = &oids.signed_data_oid;
