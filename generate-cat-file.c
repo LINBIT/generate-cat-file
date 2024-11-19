@@ -107,80 +107,110 @@ void __attribute((noreturn)) fatal(const char *msg)
 	exit(1);
 }
 
-size_t append_to_buffer(size_t n, char *data, bool write)
+size_t append_to_buffer(size_t n, char *data)
 {
-	if (write)
-	{
-		if (buffer == NULL)
-			fatal("buffer not initialized\n");
-		if ((buflen + n) > bufsz)
-			fatal("insufficient buffer size\n");
-
-		memcpy(buffer + buflen, data, n);
-		buflen += n;
-	}
+	if (buffer == NULL)
+		fatal("buffer not initialized\n");
+	if ((buflen + n) > bufsz)
+		fatal("insufficient buffer size\n");
+	
+	memcpy(buffer + buflen, data, n);
+	buflen += n;
+	
 	return n;
 }
 
 size_t encode_integer(int i, bool write)
 {
-	char int_buf[10] = { INTEGER_TAG, };
 	char sign = 0;
-
+	
 	if (i < 0) {
 		i = -i;
 		sign = 0x80;
 	}
-	if (i < 0x80) {
-		int_buf[1] = 1;	/* length (without header) */
-		int_buf[2] = i | sign;
-		return append_to_buffer(3, int_buf, write);
+	
+	if (write)
+	{
+		char int_buf[6] = { INTEGER_TAG, };
+		
+		if (i < 0x80) {
+			int_buf[1] = 1;	/* length (without header) */
+			int_buf[2] = i | sign;
+			return append_to_buffer(3, int_buf);
+		}
+		if (i < 0x8000) {
+			int_buf[1] = 2;	/* length */
+			int_buf[2] = (i >> 8) | sign;
+			int_buf[3] = i & 0xff;
+			return append_to_buffer(4, int_buf);
+		}
+		if (i < 0x800000) {
+			int_buf[1] = 3;	/* length */
+			int_buf[2] = (i >> 16) | sign;
+			int_buf[3] = (i >> 8) & 0xff;
+			int_buf[4] = i & 0xff;
+			return append_to_buffer(5, int_buf);
+		}
+		if (i < 0x80000000) {
+			int_buf[1] = 4;	/* length */
+			int_buf[2] = (i >> 24) | sign;
+			int_buf[3] = (i >> 16) & 0xff;
+			int_buf[4] = (i >> 8) & 0xff;
+			int_buf[5] = i & 0xff;
+			return append_to_buffer(6, int_buf);
+		}
 	}
-	if (i < 0x8000) {
-		int_buf[1] = 2;	/* length */
-		int_buf[2] = (i >> 8) | sign;
-		int_buf[3] = i & 0xff;
-		return append_to_buffer(4, int_buf, write);
-	}
-	if (i < 0x800000) {
-		int_buf[1] = 3;	/* length */
-		int_buf[2] = (i >> 16) | sign;
-		int_buf[3] = (i >> 8) & 0xff;
-		int_buf[4] = i & 0xff;
-		return append_to_buffer(5, int_buf, write);
-	}
-	if (i < 0x80000000) {
-		int_buf[1] = 4;	/* length */
-		int_buf[2] = (i >> 24) | sign;
-		int_buf[3] = (i >> 16) & 0xff;
-		int_buf[4] = (i >> 8) & 0xff;
-		int_buf[5] = i & 0xff;
-		return append_to_buffer(6, int_buf, write);
+	else
+	{
+		if (i < 0x80)
+			return 3;
+		if (i < 0x8000)
+			return 4;
+		if (i < 0x800000)
+			return 5;
+		if (i < 0x80000000)
+			return 6;
 	}
 	fatal("Can't encode this integer\n");
 }
 
-size_t encode_oid_component(int oc, bool write)
+size_t sizeof_oid_arc(int arc)
 {
-	char oid_buf[10];
+	if (arc < 0)
+		fatal("OID component must not be negative.\n");
+	
+	if (arc < 0x80)
+		return 1;
+	if (arc < 0x4000)
+		return 2;
+	if (arc < 0x200000)
+		return 3;
+	
+	fatal("Can't encode this OID component\n");
+}
 
+size_t encode_oid_component(int oc)
+{
 	if (oc < 0) {
 		fatal("OID component must not be negative.\n");
 	}
+	
+	char oid_buf[3];
+	
 	if (oc < 0x80) {
 		oid_buf[0] = oc;
-		return append_to_buffer(1, oid_buf, write);
+		return append_to_buffer(1, oid_buf);
 	}
 	if (oc < 0x4000) {
 		oid_buf[0] = ((oc >> 7) & 0x7f) | 0x80 ;
 		oid_buf[1] = oc & 0x7f;
-		return append_to_buffer(2, oid_buf, write);
+		return append_to_buffer(2, oid_buf);
 	}
 	if (oc < 0x200000) {
 		oid_buf[0] = ((oc >> 14) & 0x7f) | 0x80 ;
 		oid_buf[1] = ((oc >> 7) & 0x7f) | 0x80 ;
 		oid_buf[2] = oc & 0x7f;
-		return append_to_buffer(3, oid_buf, write);
+		return append_to_buffer(3, oid_buf);
 	}
 	fatal("Can't encode this OID component\n");
 }
@@ -190,7 +220,9 @@ size_t encode_oid(char *oid, bool write)
 	char *next;
 	size_t len;
 	int l0, l1, l;
-
+	
+	size_t (*oid_component_handler)(int) = sizeof_oid_arc;
+	
 	l0 = strtoul(oid, &next, 10);
 	if (l0 == 0 && errno != 0) {
 		fatal("could not parse OID element\n");
@@ -205,8 +237,11 @@ size_t encode_oid(char *oid, bool write)
 	if (*next != '.' && *next != '\0') {
 		fatal("Syntax error in OID\n");
 	}
-	len = encode_oid_component(l0*40 + l1, write);
-
+	if (write)
+		oid_component_handler = encode_oid_component;
+	
+	len = oid_component_handler(l0*40 + l1);
+	
 	while (*next != '\0') {
 		l = strtoul(next+1, &next, 10);
 		if (l == 0 && errno != 0) {
@@ -215,44 +250,68 @@ size_t encode_oid(char *oid, bool write)
 		if (*next != '.' && *next != '\0') {
 			fatal("Syntax error in OID\n");
 		}
-		len += encode_oid_component(l, write);
+		len += oid_component_handler(l);
 	}
 	return len;
 }
 
 size_t encode_null(bool write)
 {
+	if (!write)
+		return 2;
+	
 	char null_buf[2] = { NULL_TAG, 0x00 };
-	return append_to_buffer(sizeof(null_buf), null_buf, write);
+	return append_to_buffer(2, null_buf);
 }
 
 size_t encode_empty_set(bool write)
 {
+	if (!write)
+		return 2;
+	
 	char empty_set_buf[2] = { SET_TAG, 0x00 };
-	return append_to_buffer(sizeof(empty_set_buf), empty_set_buf, write);
+	return append_to_buffer(2, empty_set_buf);
 }
 
 size_t encode_tag_and_length(char tag, size_t length, bool write)
 {
-	char tag_and_length[10];
-	tag_and_length[0] = tag;
-
-	if (length < 0x80) {
-		tag_and_length[1] = length;
-		return append_to_buffer(2, tag_and_length, write);
+	if (write)
+	{
+		char tag_and_length[5] = { tag, };
+		
+		if (length < 0x80) {
+			tag_and_length[1] = length;
+			return append_to_buffer(2, tag_and_length);
+		}
+		if (length < 0x100) {
+			tag_and_length[1] = 0x81;	/* 1 more length bytes */
+			tag_and_length[2] = length;
+			return append_to_buffer(3, tag_and_length);
+		}
+		if (length < 0x10000) {
+			tag_and_length[1] = 0x82;	/* 2 more length bytes */
+			tag_and_length[2] = (length >> 8) & 0xff;
+			tag_and_length[3] = length & 0xff;
+			return append_to_buffer(4, tag_and_length);
+		}
+		if (length < 0x1000000) {
+			tag_and_length[1] = 0x83;	/* 3 more length bytes */
+			tag_and_length[2] = (length >> 16) & 0xff;
+			tag_and_length[3] = (length >> 8) & 0xff;
+			tag_and_length[4] = length & 0xff;
+			return append_to_buffer(5, tag_and_length);
+		}
 	}
-	if (length < 0x10000) {
-		tag_and_length[1] = 0x82;	/* 2 more length bytes */
-		tag_and_length[2] = (length >> 8) & 0xff;
-		tag_and_length[3] = length & 0xff;
-		return append_to_buffer(4, tag_and_length, write);
-	}
-	if (length < 0x1000000) {
-		tag_and_length[1] = 0x83;	/* 3 more length bytes */
-		tag_and_length[2] = (length >> 16) & 0xff;
-		tag_and_length[3] = (length >> 8) & 0xff;
-		tag_and_length[4] = length & 0xff;
-		return append_to_buffer(5, tag_and_length, write);
+	else
+	{
+		if (length < 0x80)
+			return 2;
+		if (length < 0x100)
+			return 3;
+		if (length < 0x10000)
+			return 4;
+		if (length < 0x1000000)
+			return 5;
 	}
 	fatal("This length is not supported\n");
 }
@@ -260,101 +319,161 @@ size_t encode_tag_and_length(char tag, size_t length, bool write)
 size_t encode_octet_string(struct octet_string *s, bool write)
 {
 	size_t l2 = encode_tag_and_length(OCTET_STRING_TAG, s->len, write);
-	return append_to_buffer(s->len, s->data, write) + l2;
+	if (write)
+		return append_to_buffer(s->len, s->data) + l2;
+	
+	return s->len + l2;
 }
 
 	/* This one is big endian for UFT-16 */
 size_t encode_bmp_string(struct bmp_string *s, bool write)
 {
 	size_t l2 = encode_tag_and_length(BMP_STRING_TAG, s->len, write);
-	return append_to_buffer(s->len, s->data, write) + l2;
+	if (write)
+		return append_to_buffer(s->len, s->data) + l2;
+	
+	return s->len + l2;
 }
 
 size_t encode_utc_time(struct utc_time *t, bool write)
 {
 	size_t len = strlen(t->date_time);
 	size_t l2 = encode_tag_and_length(UTC_TIME_TAG, len, write);
-	return append_to_buffer(len, t->date_time, write) + l2;
+	if (write)
+		return append_to_buffer(len, t->date_time) + l2;
+	
+	return len + l2;
 }
 
+#define ARRAY_SIZE(a) (sizeof(a)/sizeof(a[0]))
 size_t encode_string_as_utf16(const char *s, bool write)
 {
-	unsigned short utf16[1000];
 	int i;
 	struct octet_string os;
-
-#define ARRAY_SIZE(a) (sizeof(a)/sizeof(a[0]))
-	for (i=0;i<ARRAY_SIZE(utf16) && s[i]!='\0';i++) {
-		utf16[i]=(unsigned char)(s[i]);
+	
+	if (write)
+	{
+		unsigned short utf16[1000];
+		
+		for (i=0;i<ARRAY_SIZE(utf16) && s[i]!='\0';++i) {
+			utf16[i]=(unsigned char)(s[i]);
+		}
+		if (i < 1000)
+		{
+			utf16[i] = 0;
+			++i;
+			
+			os.len = i * sizeof(utf16[0]);
+			os.data = utf16;
+			
+			return encode_octet_string(&os, true);
+		}
 	}
-	if (i >= ARRAY_SIZE(utf16))
-		fatal("string too long\n");
-	utf16[i] = 0;
-	i++;
-
-	os.len = i*sizeof(utf16[0]);
-	os.data = utf16;
-
-	return encode_octet_string(&os, write);
+	else
+	{
+		i = strlen(s);
+		if (i < 1000)
+		{
+			os.len = (i + 1) * sizeof(unsigned short);
+			os.data = NULL;
+			
+			return encode_octet_string(&os, false);
+		}
+	}
+	
+	fatal("string too long\n");
 }
 
 size_t encode_string_as_utf16_bmp(const char *s, bool write)
 {
-	unsigned short utf16[1000];
 	int i;
 	struct bmp_string os;
-
-	for (i=0;s[i]!='\0' && i<sizeof(utf16)/sizeof(utf16[0]);i++) {
-		utf16[i]=(unsigned char)(s[i]) << 8;
+	
+	if (write)
+	{
+		unsigned short utf16[1000];
+		
+		for (i=0;i<ARRAY_SIZE(utf16) && s[i]!='\0';++i) {
+			utf16[i]=(unsigned char)(s[i]) << 8;
+		}
+		
+		if (s[i] == '\0')
+		{
+			os.len = i * sizeof(utf16[0]);
+			os.data = utf16;
+			
+			return encode_bmp_string(&os, true);
+		}
 	}
-	if (s[i] != '\0')
-		fatal("string too long\n");
-
-	os.len = i*sizeof(utf16[0]);
-	os.data = utf16;
-
-	return encode_bmp_string(&os, write);
+	else
+	{
+		i = strlen(s);
+		if (i <= 1000)
+		{
+			os.len = i * sizeof(unsigned short);
+			os.data = NULL;
+			
+			return encode_bmp_string(&os, false);
+		}
+	}
+	
+	fatal("string too long\n");
 }
 
 size_t encode_oid_with_header(struct oid *oid, bool write)
 {
 	size_t len = encode_oid(oid->oid, false);
-
+	
 	size_t l2 = encode_tag_and_length(OID_TAG, len, write);
-	return encode_oid(oid->oid, write) + l2;
+	if (write)
+		return encode_oid(oid->oid, true) + l2;
+	
+	return len + l2;
 }
 
 size_t encode_sequence(void *s, size_t a_fn(void*, bool), bool write)
 {
 	size_t length = a_fn(s, false);
-
+	
 	size_t l2 = encode_tag_and_length(SEQUENCE_TAG, length, write);
-	return a_fn(s, write) + l2;
+	if (write)
+		return a_fn(s, true) + l2;
+	
+	return length + l2;
 }
 
 	/* TODO: differs only in tag value ... */
 size_t encode_set(void *s, size_t a_fn(void*, bool), bool write)
 {
 	size_t length = a_fn(s, false);
-
+	
 	size_t l2 = encode_tag_and_length(SET_TAG, length, write);
-	return a_fn(s, write) + l2;
+	if (write)
+		return a_fn(s, true) + l2;
+	
+	return length + l2;
 }
 
 size_t encode_array(void *s, size_t a_fn(void*, bool), bool write)
 {
 	size_t length = a_fn(s, false);
-
+	
 	size_t l2 = encode_tag_and_length(ARRAY_TAG, length, write);
-	return a_fn(s, write) + l2;
+	if (write)
+		return a_fn(s, true) + l2;
+	
+	return length + l2;
 }
 
 size_t encode_as_octet_string(void *s, size_t a_fn(void*, bool), bool write)
 {
 	size_t length = a_fn(s, false);
-
+	
 	size_t l2 = encode_tag_and_length(OCTET_STRING_TAG, length, write);
-	return a_fn(s, write) + l2;
+	if (write)
+		return a_fn(s, true) + l2;
+	
+	return length + l2;
 }
 
 size_t encode_algo(void *p, bool write)
@@ -435,16 +554,19 @@ size_t encode_member_info_oid(void *p, bool write)
 
 size_t encode_obsolete_image_data(void *p, bool write)
 {
-	char image_data[0x26] = { 0x03, 0x02, 0x05, 0xA0, 0xA0, 0x20, 0xA2, 0x1E , 0x80 , 0x1C , 0x00 , 0x3C , 0x0, 0x3C, 0x0, 0x3C, 0x00, 0x4F, 0x00, 0x62, 0x00, 0x73, 0x00, 0x6F, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x74, 0x00, 0x65, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E };
-//	char image_data[0x18] = { 0x03, 0x02, 0x05, 0xA0, 0xA0, 0x12, 0xA2, 0x10 , 0x80 , 0x0E, 0x00, 0x5A, 0x00, 0x61, 0x00, 0x6B, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x62, 0x00, 0x74 };
+	if (!write)
+		return 0x26;
+	
+	char image_data[0x26] = { 0x03, 0x02, 0x05, 0xA0, 0xA0, 0x20, 0xA2, 0x1E, 0x80, 0x1C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x4F, 0x00, 0x62, 0x00, 0x73, 0x00, 0x6F, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x74, 0x00, 0x65, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E };
+//	char image_data[0x18] = { 0x03, 0x02, 0x05, 0xA0, 0xA0, 0x12, 0xA2, 0x10, 0x80, 0x0E, 0x00, 0x5A, 0x00, 0x61, 0x00, 0x6B, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x62, 0x00, 0x74 };
 
 // 03 02 05 A0 A0 12 A2
 // 10 80 0E 00 7A 00 61 00  6B 00 6C 00 65 00 62 00
 // 74 30 21 30 09 06 05 2B
 // zaklebt: hacked catgen
 // 007A0061006B006C006500620074
-
-	return append_to_buffer(sizeof(image_data), image_data, write);
+	
+	return append_to_buffer(sizeof(image_data), image_data);
 }
 
 size_t encode_spc_image_data(void *p, bool write)
@@ -461,8 +583,12 @@ size_t encode_spc_image_data(void *p, bool write)
 
 size_t encode_spc_link(void *p, bool write)
 {
-	size_t length;
 	struct oid spc_link_oid = { "1.3.6.1.4.1.311.2.1.25" };
+	size_t length = encode_oid_with_header(&spc_link_oid, write);
+	
+	if (!write)
+		return length + 0x12;
+	
 /*	char link_data[0x20] = {
 		0xA2, 0x1E, 0x80, 0x1C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x3C,
 		0x00, 0x4F, 0x00, 0x62, 0x00, 0x73, 0x00, 0x6F, 0x00, 0x6C,
@@ -470,14 +596,12 @@ size_t encode_spc_link(void *p, bool write)
 		0x00, 0x3E };
 */
 	char link_data[0x12] = { 0xA2, 0x10, 0x80, 0x0E, 0x00, 0x7A, 0x00, 0x61, 0x00, 0x6B, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x62, 0x00, 0x74 };
-
+	
 // A2 10 80 0E 00 7A
 // 00 61 00 6B 00 6C 00 65  00 62 00 74 
-
-	length = encode_oid_with_header(&spc_link_oid, write);
-	length += append_to_buffer(sizeof(link_data), link_data, write);
-
-	return length;
+	
+	return
+		length + append_to_buffer(sizeof(link_data), link_data);
 }
 
 int hexdigit(char c)
@@ -821,8 +945,7 @@ int main(int argc, char ** argv)
 	s.data.an_int = 1;
 	s.data.algo.algo_oid.oid = "2.16.840.1.101.3.4.2.1";
 	s.data.cert_trust_list.cert_trust_oid.oid = "1.3.6.1.4.1.311.10.1";
-	s.data.cert_trust_list.catalog_list_element->catalog_list_oid.oid =
-		"1.3.6.1.4.1.311.12.1.1";
+	s.data.cert_trust_list.catalog_list_element->catalog_list_oid.oid = "1.3.6.1.4.1.311.12.1.1";
 	s.data.cert_trust_list.catalog_list_element->a_hash.len = 16;
 	s.data.cert_trust_list.catalog_list_element->a_hash.data = a_hash;
 	s.data.cert_trust_list.catalog_list_element->a_time.date_time = "230823140713Z";
