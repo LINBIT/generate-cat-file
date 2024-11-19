@@ -217,7 +217,7 @@ size_t encode_integer(int i, bool write)
 size_t sizeof_oid_arc(int arc)
 {
 	if (arc < 0)
-		fatal("OID component must not be negative.\n");
+		fatal("OID arc must not be negative\n");
 	
 	if (arc < 0x80)
 		return 1;
@@ -226,40 +226,13 @@ size_t sizeof_oid_arc(int arc)
 	if (arc < 0x200000)
 		return 3;
 	
-	fatal("Can't encode this OID component\n");
-}
-
-size_t encode_oid_component(int oc)
-{
-	if (oc < 0) {
-		fatal("OID component must not be negative.\n");
-	}
-	
-	char oid_buf[3];
-	
-	if (oc < 0x80) {
-		oid_buf[0] = oc;
-		return append_to_buffer(1, oid_buf);
-	}
-	if (oc < 0x4000) {
-		oid_buf[0] = ((oc >> 7) & 0x7f) | 0x80 ;
-		oid_buf[1] = oc & 0x7f;
-		return append_to_buffer(2, oid_buf);
-	}
-	if (oc < 0x200000) {
-		oid_buf[0] = ((oc >> 14) & 0x7f) | 0x80 ;
-		oid_buf[1] = ((oc >> 7) & 0x7f) | 0x80 ;
-		oid_buf[2] = oc & 0x7f;
-		return append_to_buffer(3, oid_buf);
-	}
-	fatal("Can't encode this OID component\n");
+	fatal("can't encode this OID arc\n");
 }
 
 size_t encode_oid_arc_to_cache(int arc, char *buf)
 {
-	if (arc < 0) {
-		fatal("OID component must not be negative.\n");
-	}
+	if (arc < 0)
+		fatal("OID arc must not be negative\n");
 	
 	if (arc < 0x80) {
 		buf[0] = arc;
@@ -277,86 +250,93 @@ size_t encode_oid_arc_to_cache(int arc, char *buf)
 		return 3;
 	}
 	
-	fatal("Can't encode this OID component\n");
+	fatal("can't encode this OID arc\n");
+}
+
+size_t encode_oid_arc(int arc)
+{
+	char buf[3];
+	size_t length = encode_oid_arc_to_cache(arc, buf);
+	return append_to_buffer(length, buf);
 }
 
 size_t encode_oid(char *oid, bool write)
 {
 	char *next;
-	size_t len;
-	int l0, l1, l;
+	size_t length;
+	int root, sroot, child;
 	
-	size_t (*oid_component_handler)(int) = sizeof_oid_arc;
+	size_t(*oid_arc_handler)(int) = sizeof_oid_arc;
 	
 	
-	l0 = strtoul(oid, &next, 10);
-	if (l0 == 0 && errno != 0) {
-		fatal("could not parse OID element\n");
+	root = strtoul(oid, &next, 10);
+	if (root == 0 && errno != 0) {
+		fatal("could not parse OID root arc\n");
 	}
 	if (*next != '.') {
-		fatal("Syntax error in OID\n");
+		fatal("syntax error in OID\n");
 	}
-	l1 = strtoul(next+1, &next, 10);
-	if (l1 == 0 && errno != 0) {
-		fatal("could not parse OID element\n");
+	sroot = strtoul(next+1, &next, 10);
+	if (sroot == 0 && errno != 0) {
+		fatal("could not parse OID sub-root arc\n");
 	}
 	if (*next != '.' && *next != '\0') {
-		fatal("Syntax error in OID\n");
+		fatal("syntax error in OID\n");
 	}
 	if (write)
-		oid_component_handler = encode_oid_component;
+		oid_arc_handler = encode_oid_arc;
 	
-	len = oid_component_handler(l0*40 + l1);
+	length = oid_arc_handler(root*40 + sroot);
 	
 	while (*next != '\0') {
-		l = strtoul(next+1, &next, 10);
-		if (l == 0 && errno != 0) {
-			fatal("could not parse OID element\n");
+		child = strtoul(next+1, &next, 10);
+		if (child == 0 && errno != 0) {
+			fatal("could not parse OID child arc\n");
 		}
 		if (*next != '.' && *next != '\0') {
-			fatal("Syntax error in OID\n");
+			fatal("syntax error in OID\n");
 		}
-		len += oid_component_handler(l);
+		length += oid_arc_handler(child);
 	}
-	return len;
+	return length;
 }
 
 size_t encode_oid_to_cache(char *oid, char *buf, size_t buf_sz)
 {
-	size_t oid_len;
+	size_t length;
 	char *next;
 	int root, sroot, child;
 	
 	
 	root = strtoul(oid, &next, 10);
 	if (root == 0 && errno != 0) {
-		fatal("could not parse OID element\n");
+		fatal("could not parse OID root arc\n");
 	}
 	if (*next != '.') {
-		fatal("Syntax error in OID\n");
+		fatal("syntax error in OID\n");
 	}
 	sroot = strtoul(next+1, &next, 10);
 	if (sroot == 0 && errno != 0) {
-		fatal("could not parse OID element\n");
+		fatal("could not parse OID sub-root arc\n");
 	}
 	if (*next != '.' && *next != '\0') {
-		fatal("Syntax error in OID\n");
+		fatal("syntax error in OID\n");
 	}
-	oid_len = encode_oid_arc_to_cache(root * 40 + sroot, buf);
+	length = encode_oid_arc_to_cache(root * 40 + sroot, buf);
 	
 	while (*next != '\0') {
-		if ((oid_len + 3) > buf_sz)
+		if ((length + 3) > buf_sz)
 			fatal("can't encode this OID\n");
 		
 		child = strtoul(next+1, &next, 10);
 		if (child == 0 && errno != 0)
-			fatal("could not parse OID element\n");
+			fatal("could not parse OID child arc\n");
 		if (*next != '.' && *next != '\0')
-			fatal("Syntax error in OID\n");
+			fatal("syntax error in OID\n");
 		
-		oid_len += encode_oid_arc_to_cache(child, buf + oid_len);
+		length += encode_oid_arc_to_cache(child, buf + length);
 	}
-	return oid_len;
+	return length;
 }
 
 size_t encode_null(bool write)
@@ -527,20 +507,20 @@ size_t encode_string_as_utf16_bmp(const char *s, bool write)
 //for any oids; necessary data is calculated on each request; may be expensive with "hot" oids
 size_t encode_plain_oid_with_header(char *oid, bool write)
 {
-	size_t len = encode_oid(oid, false);
+	size_t data_length = encode_oid(oid, false);
 	
-	size_t l2 = encode_tag_and_length(OID_TAG, len, write);
+	size_t head_length = encode_tag_and_length(OID_TAG, data_length, write);
 	if (write)
-		return encode_oid(oid, true) + l2;
+		return encode_oid(oid, true) + head_length;
 	
-	return len + l2;
+	return data_length + head_length;
 }
 
 //for known oids; necessary data is calculated on first request and cached inside the oid object for further usage
 size_t encode_known_oid_with_header(struct oid_data *oid, bool write)
 {
 	if (oid->string == NULL || *oid->string == '\0')
-		fatal("the string value of the known OID must be not NULL nor empty string");
+		fatal("the string value of the known OID must be not NULL nor empty string\n");
 	
 	if (oid->bytes == NULL)
 	{
