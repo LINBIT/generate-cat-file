@@ -545,11 +545,10 @@ size_t encode_tagged_data(char tag, void *s, size_t a_fn(void*, bool), bool writ
 
 size_t encode_algo(void *p, bool write)
 {
-	struct algo *a = p;
 	size_t length = 0;
 	
-	length += encode_known_oid_with_header(a->algo_oid, write);
-	//length += encode_known_oid_with_header(&datacache.oids->algo_oid, write);
+	//length += encode_known_oid_with_header(((struct algo*)p)->algo_oid, write);
+	length += encode_known_oid_with_header(&datacache.oids->algo_oid, write);
 	length += encode_null(write);
 	
 	return length;
@@ -562,13 +561,13 @@ size_t encode_algo_sequence(void *p, bool write)
 
 size_t encode_attribute_name_and_value(void *p, bool write)
 {
-	struct an_attribute *a = p;
-	size_t length;
-
-	length = encode_string_as_utf16_bmp(a->name, write);
+	struct an_attribute *attr = p;
+	size_t length = 0;
+	
+	length += encode_string_as_utf16_bmp(attr->name, write);
 	length += encode_integer(268500993, write);
-	length += encode_string_as_utf16(a->value, write);
-
+	length += encode_string_as_utf16(attr->value, write);
+	
 	return length;
 }
 
@@ -590,12 +589,12 @@ size_t encode_attribute(void *p, bool write)
 
 size_t encode_member_info(void *p, bool write)
 {
-	struct a_file *f = p;
-	size_t length;
-
-	length = encode_string_as_utf16_bmp(f->guid, write);
+	struct a_file *file = p;
+	size_t length = 0;
+	
+	length += encode_string_as_utf16_bmp(file->guid, write);
 	length += encode_integer(512, write);
-
+	
 	return length;
 }
 
@@ -761,11 +760,10 @@ size_t encode_files(void *p, bool write)
 
 size_t encode_catalog_list_member_oid(void *p, bool write)
 {
-	struct catalog_list_element *e = p;
 	size_t length = 0;
 	
-	length += encode_known_oid_with_header(e->catalog_list_member_oid, write);
-	//length += encode_known_oid_with_header(&datacache.oids->catalog_list_member_oid, write);
+	//length += encode_known_oid_with_header(((struct catalog_list_element*)p)->catalog_list_member_oid, write);
+	length += encode_known_oid_with_header(&datacache.oids->catalog_list_member_oid, write);
 	length += encode_null(write);
 	
 	return length;
@@ -773,10 +771,8 @@ size_t encode_catalog_list_member_oid(void *p, bool write)
 
 size_t encode_catalog_list_oid(void *p, bool write)
 {
-	struct catalog_list_element *e = p;
-	
-	return encode_known_oid_with_header(e->catalog_list_oid, write);
-	//return encode_known_oid_with_header(&datacache.oids->catalog_list_oid, write);
+	//return encode_known_oid_with_header(((struct catalog_list_element*)p)->catalog_list_oid, write);
+	return encode_known_oid_with_header(&datacache.oids->catalog_list_oid, write);
 }
 
 size_t encode_global_attributes2(void *p, bool write)
