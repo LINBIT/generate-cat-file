@@ -140,8 +140,17 @@ struct known_oids {
 	struct oid_data spc_algo_oid;
 };
 
+struct node_data {
+	struct i_list_node node;
+	size_t length;
+	//int tag;	//mostly used for debugging purpose, but can be for tag match validation (so the length cache isn't so blind)
+};
+
 struct cache {
 	struct known_oids *oids;
+	//each calculation/write advance this to last visited leaf in current branch
+	//so, on write just after calc for the same branch, store current node before calc and restore it before write
+	struct node_data *node;
 };
 
 size_t buflen = 0;
@@ -421,16 +430,26 @@ size_t encode_oid_to_cache(char *oid, char *buf, size_t buf_sz)
 	return length;
 }
 
-//for any oids; necessary data is calculated on each request; may be expensive with "hot" oids
+//for any oids; byte form is calculated on each write; may be expensive with "hot" oids
 size_t encode_plain_oid_with_header(char *oid, bool write)
 {
-	size_t data_length = encode_oid(oid, false);
+	struct node_data *this_node = (struct node_data*)datacache.node->node.next;
 	
-	size_t head_length = encode_tag_and_length(OID_TAG, data_length, write);
+	if (this_node == NULL)
+	{
+		this_node = malloc(sizeof(struct node_data));
+		datacache.node->node.next = (struct i_list_node*)this_node;
+		//this_node->tag = OID_TAG;
+		this_node->node.next = NULL;
+		this_node->length = encode_oid(oid, false);
+	}
+	
+	datacache.node = this_node;
+	size_t head_length = encode_tag_and_length(OID_TAG, this_node->length, write);
 	if (write)
 		return encode_oid(oid, true) + head_length;
 	
-	return data_length + head_length;
+	return this_node->length + head_length;
 }
 
 //for known oids; necessary data is calculated on first request and cached inside the oid object for further usage
@@ -538,13 +557,28 @@ size_t encode_string_as_utf16_bmp(const char *s, bool write)
 //generic data encoder
 size_t encode_tagged_data(char tag, void *s, size_t a_fn(void*, bool), bool write)
 {
-	size_t data_length = a_fn(s, false);
+	struct node_data *this_node = (struct node_data*)datacache.node->node.next;
 	
-	size_t head_length = encode_tag_and_length(tag, data_length, write);
+	if (this_node == NULL)
+	{
+		this_node = malloc(sizeof(struct node_data));
+		datacache.node->node.next = (struct i_list_node*)this_node;
+		datacache.node = this_node;
+		//this_node->tag = tag;
+		this_node->node.next = NULL;
+		//a_fn may also change datacache.node, so we can't rely on it anymore (it's by design)
+		this_node->length = a_fn(s, false);
+	}
+	
+	size_t head_length = encode_tag_and_length(tag, this_node->length, write);
 	if (write)
+	{
+		//(re-)set datacache.node to proper reference
+		datacache.node = this_node;
 		return a_fn(s, true) + head_length;
+	}
 	
-	return data_length + head_length;
+	return this_node->length + head_length;
 }
 
 
@@ -881,6 +915,19 @@ size_t encode_pkcs7_toplevel(void *p, bool write)
 
 void free_allocated(struct pkcs7_toplevel *sdat)
 {
+	struct node_data *next_node = datacache.node;
+	struct node_data *this_node;
+	datacache.node = NULL;
+	while (next_node)
+	{
+		this_node = next_node;
+		next_node = (struct node_data*)this_node->node.next;
+		this_node->length = 0;
+		//this_node->tag = 0;
+		this_node->node.next = NULL;
+		free(this_node);
+	}
+	
 	struct a_file *next_file = sdat->data.cert_trust_list.catalog_list_element->files;
 	struct a_file *this_file;
 	sdat->data.cert_trust_list.catalog_list_element->files = NULL;
@@ -911,10 +958,18 @@ void free_allocated(struct pkcs7_toplevel *sdat)
 
 void create_binary_tree(struct pkcs7_toplevel *sdat)
 {
-	/* compute sufficient buffer size */
 	buflen = 0;
-	size_t data_length = encode_pkcs7_toplevel(sdat, false);
-	bufsz = encode_tag_and_length(SEQUENCE_TAG, data_length, false) + data_length;
+	/* store root_node, as it will be used for buffer size and also as reset point */
+	struct node_data *root_node = datacache.node;
+	/* compute sufficient buffer size and store it in root node */
+	root_node->length = encode_pkcs7_toplevel(sdat, false);
+	bufsz =
+		  encode_tag_and_length(SEQUENCE_TAG, root_node->length, false)
+		+ root_node->length
+	;
+	
+	if (buflen != 0)
+		fatal("unexpected write\n");
 	
 	/* place for extra limitation
 	   take a note:
@@ -926,8 +981,10 @@ void create_binary_tree(struct pkcs7_toplevel *sdat)
 	buffer = malloc(bufsz);
 	if (buffer == NULL)
 		fatal("out of memory");
+	/* reset cache node to root_node */
+	datacache.node = root_node;
 	/* write data to buffer */
-	encode_tag_and_length(SEQUENCE_TAG, data_length, true);
+	encode_tag_and_length(SEQUENCE_TAG, root_node->length, true);
 	encode_pkcs7_toplevel(sdat, true);
 	
 	/* check written data length */
@@ -1032,6 +1089,7 @@ int main(int argc, char **argv)
 	struct pkcs7_toplevel s = { 0 };
 	struct known_oids oids = { 0 };
 	
+	struct node_data *root_node = NULL;
 	struct a_file *files = NULL;
 	
 	/* initialize data structure */
@@ -1111,14 +1169,18 @@ int main(int argc, char **argv)
 	s.data.cert_trust_list.catalog_list_element->catalog_list_oid = &oids.catalog_list_oid;
 	s.data.cert_trust_list.catalog_list_element->catalog_list_member_oid = &oids.catalog_list_member_oid;
 	
+	//create root node, that will be used in create_binary_tree()
+	root_node = calloc(1, sizeof(struct node_data));
+	datacache.node = root_node;
 	
 	
 	/* generate binary DER */
 	create_binary_tree(&s);
 	
 	/* free the memory allocated on the heap */
+	datacache.node = root_node; //otherwise, all used nodes except the last one would not be freed
 	free_allocated(&s);
-	files = NULL;
+	root_node = NULL; files = NULL;
 	
 	/* and write to stdout or so ... */
 	fwrite(buffer, buflen, 1, stdout);
