@@ -141,6 +141,7 @@ char *buffer = NULL;
 
 struct cache datacache = { 0 };
 
+
 void __attribute((noreturn)) fatal(const char *msg)
 {
 	fprintf(stderr, "%s", msg);
@@ -158,6 +159,26 @@ size_t append_to_buffer(size_t n, char *data)
 	buflen += n;
 	
 	return n;
+}
+
+//primitive writers
+
+size_t encode_null(bool write)
+{
+	if (!write)
+		return 2;
+	
+	char null_buf[2] = { NULL_TAG, 0x00 };
+	return append_to_buffer(2, null_buf);
+}
+
+size_t encode_empty_set(bool write)
+{
+	if (!write)
+		return 2;
+	
+	char empty_set_buf[2] = { SET_TAG, 0x00 };
+	return append_to_buffer(2, empty_set_buf);
 }
 
 size_t encode_integer(int i, bool write)
@@ -211,7 +232,56 @@ size_t encode_integer(int i, bool write)
 		if (i < 0x80000000)
 			return 6;
 	}
-	fatal("Can't encode this integer\n");
+	fatal("can't encode this integer\n");
+}
+
+size_t encode_length_to_cache(size_t len, char* buf)
+{
+	if (len < 0x80) {
+		buf[0] = len;
+		return 1;
+	}
+	if (len < 0x100) {
+		buf[0] = 0x81;	/* 1 more length bytes */
+		buf[1] = len;
+		return 2;
+	}
+	if (len < 0x10000) {
+		buf[0] = 0x82;	/* 2 more length bytes */
+		buf[1] = (len >> 8) & 0xff;
+		buf[2] = len & 0xff;
+		return 3;
+	}
+	if (len < 0x1000000) {
+		buf[0] = 0x83;	/* 3 more length bytes */
+		buf[1] = (len >> 16) & 0xff;
+		buf[2] = (len >> 8) & 0xff;
+		buf[3] = len & 0xff;
+		return 4;
+	}
+	fatal("unsupported tag length\n");
+}
+
+size_t encode_tag_and_length(char tag, size_t len, bool write)
+{
+	if (write)
+	{
+		char buf[5] = { tag, };
+		size_t length = 1 + encode_length_to_cache(len, buf + 1);
+		return append_to_buffer(length, buf);
+	}
+	else
+	{
+		if (len < 0x80)
+			return 2;
+		if (len < 0x100)
+			return 3;
+		if (len < 0x10000)
+			return 4;
+		if (len < 0x1000000)
+			return 5;
+	}
+	fatal("unsupported tag length\n");
 }
 
 size_t sizeof_oid_arc(int arc)
@@ -259,6 +329,9 @@ size_t encode_oid_arc(int arc)
 	size_t length = encode_oid_arc_to_cache(arc, buf);
 	return append_to_buffer(length, buf);
 }
+
+
+// oids encoders
 
 size_t encode_oid(char *oid, bool write)
 {
@@ -339,65 +412,44 @@ size_t encode_oid_to_cache(char *oid, char *buf, size_t buf_sz)
 	return length;
 }
 
-size_t encode_null(bool write)
+//for any oids; necessary data is calculated on each request; may be expensive with "hot" oids
+size_t encode_plain_oid_with_header(char *oid, bool write)
 {
-	if (!write)
-		return 2;
+	size_t data_length = encode_oid(oid, false);
 	
-	char null_buf[2] = { NULL_TAG, 0x00 };
-	return append_to_buffer(2, null_buf);
-}
-
-size_t encode_empty_set(bool write)
-{
-	if (!write)
-		return 2;
-	
-	char empty_set_buf[2] = { SET_TAG, 0x00 };
-	return append_to_buffer(2, empty_set_buf);
-}
-
-size_t encode_tag_and_length(char tag, size_t length, bool write)
-{
+	size_t head_length = encode_tag_and_length(OID_TAG, data_length, write);
 	if (write)
+		return encode_oid(oid, true) + head_length;
+	
+	return data_length + head_length;
+}
+
+//for known oids; necessary data is calculated on first request and cached inside the oid object for further usage
+size_t encode_known_oid_with_header(struct oid_data *oid, bool write)
+{
+	if (oid->string == NULL || *oid->string == '\0')
+		fatal("the string value of the known OID must be not NULL nor empty string\n");
+	
+	if (oid->bytes == NULL)
 	{
-		char tag_and_length[5] = { tag, };
-		
-		if (length < 0x80) {
-			tag_and_length[1] = length;
-			return append_to_buffer(2, tag_and_length);
-		}
-		if (length < 0x100) {
-			tag_and_length[1] = 0x81;	/* 1 more length bytes */
-			tag_and_length[2] = length;
-			return append_to_buffer(3, tag_and_length);
-		}
-		if (length < 0x10000) {
-			tag_and_length[1] = 0x82;	/* 2 more length bytes */
-			tag_and_length[2] = (length >> 8) & 0xff;
-			tag_and_length[3] = length & 0xff;
-			return append_to_buffer(4, tag_and_length);
-		}
-		if (length < 0x1000000) {
-			tag_and_length[1] = 0x83;	/* 3 more length bytes */
-			tag_and_length[2] = (length >> 16) & 0xff;
-			tag_and_length[3] = (length >> 8) & 0xff;
-			tag_and_length[4] = length & 0xff;
-			return append_to_buffer(5, tag_and_length);
-		}
+		// size of this buffer(256 + 4) is based on
+		// max length of oid arc in bytes(3 for local encoder) times max known count of arcs(34)
+		// rounded to nearest power of two
+		// plus max length of length value(4 for local encoder)
+		char oid_buf[0x104];
+		size_t data_length = encode_oid_to_cache(oid->string, oid_buf + 4, 0x100);
+		size_t head_length = 1 + encode_length_to_cache(data_length, oid_buf);
+		oid->length = data_length + head_length;
+		oid->bytes = malloc(oid->length);
+		oid->bytes[0] = OID_TAG;
+		memcpy(oid->bytes + 1, oid_buf, head_length);
+		memcpy(oid->bytes + head_length, oid_buf + 4, data_length);
 	}
-	else
-	{
-		if (length < 0x80)
-			return 2;
-		if (length < 0x100)
-			return 3;
-		if (length < 0x10000)
-			return 4;
-		if (length < 0x1000000)
-			return 5;
-	}
-	fatal("This length is not supported\n");
+	
+	if (write)
+		return append_to_buffer(oid->length, oid->bytes);
+	
+	return oid->length;
 }
 
 size_t encode_octet_string(struct octet_string *s, bool write)
@@ -502,62 +554,6 @@ size_t encode_string_as_utf16_bmp(const char *s, bool write)
 	}
 	
 	fatal("string too long\n");
-}
-
-//for any oids; necessary data is calculated on each request; may be expensive with "hot" oids
-size_t encode_plain_oid_with_header(char *oid, bool write)
-{
-	size_t data_length = encode_oid(oid, false);
-	
-	size_t head_length = encode_tag_and_length(OID_TAG, data_length, write);
-	if (write)
-		return encode_oid(oid, true) + head_length;
-	
-	return data_length + head_length;
-}
-
-//for known oids; necessary data is calculated on first request and cached inside the oid object for further usage
-size_t encode_known_oid_with_header(struct oid_data *oid, bool write)
-{
-	if (oid->string == NULL || *oid->string == '\0')
-		fatal("the string value of the known OID must be not NULL nor empty string\n");
-	
-	if (oid->bytes == NULL)
-	{
-		// size of this buffer(256) is based on
-		// max length of oid arc in bytes(3 for local encoder) times max known count of arcs(34)
-		// and rounded to nearest power of two
-		char oid_buf[0x100];
-		size_t data_length = encode_oid_to_cache(oid->string, oid_buf, 0x100);
-		if (data_length < 0x80)
-		{
-			oid->length = data_length + 2;
-			oid->bytes = malloc(oid->length);
-			oid->bytes[1] = data_length;
-		}
-		else if (data_length < 0x100)
-		{
-			oid->length = data_length + 3;
-			oid->bytes = malloc(oid->length);
-			oid->bytes[1] = 0x81;	/* 1 more length bytes */
-			oid->bytes[2] = data_length;
-		}
-		else
-		{
-			oid->length = data_length + 4;
-			oid->bytes = malloc(oid->length);
-			oid->bytes[1] = 0x82;	/* 2 more length bytes */
-			oid->bytes[2] = (data_length >> 8) & 0xff;
-			oid->bytes[3] = data_length & 0xff;
-		}
-		oid->bytes[0] = OID_TAG;
-		memcpy(oid->bytes + oid->length - data_length, oid_buf, data_length);
-	}
-	
-	if (write)
-		return append_to_buffer(oid->length, oid->bytes);
-	
-	return oid->length;
 }
 
 size_t encode_sequence(void *s, size_t a_fn(void*, bool), bool write)
