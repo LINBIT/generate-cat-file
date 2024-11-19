@@ -23,6 +23,11 @@
 #define UTF16_MAX_LEN	1000
 
 
+//kind of interface for linked-list-node-like structs
+struct i_list_node {
+	struct i_list_node *next;
+};
+
 struct oid_data {
 	/* the OID in human readable form */
 	char *string;
@@ -66,16 +71,19 @@ struct an_attribute {
 };
 
 struct a_file {
-	char *guid;	/* {C689AAB8-8E78-11D0-8C47-00C04FC295EE} */
-	char sha1_str[SHA1_STR_LEN + 1]; //sha1 string
-	char sha1_bytes[SHA1_BYTE_LEN]; //sha1 bytes in big endian order
+	struct i_list_node node;
 	
-	struct an_attribute file_attribute;
+	char *guid;	/* {C689AAB8-8E78-11D0-8C47-00C04FC295EE} */
+	//struct oid_data *member_info_oid; //file is a "hot" struct
+	char *sha1_str; //sha1 string
+	
+	struct an_attribute name_attribute;
 	struct an_attribute os_attribute;
 	
-	//struct oid_data *member_info_oid; //file is a "hot" struct
+	bool is_pe;
 	
-	bool is_link;
+	//char sha1_str[SHA1_STR_LEN + 1]; //sha1 string
+	char sha1_bytes[SHA1_BYTE_LEN];  //sha1 bytes in big endian order
 };
 
 struct catalog_list_element {
@@ -84,11 +92,10 @@ struct catalog_list_element {
 	char *a_time;
 	struct oid_data *catalog_list_member_oid;
 	
+	struct a_file *files;
+	
 	struct an_attribute hardware_id;
 	struct an_attribute os_info;
-	
-	int nr_files;
-	struct a_file files[0];
 };
 
 struct cert_trust_list {
@@ -700,7 +707,7 @@ size_t encode_spc(void *p, bool write)
 	struct a_file *file = p;
 	size_t length = 0;
 	
-	length += encode_tagged_data(SEQUENCE_TAG, p, file->is_link? encode_spc_link : encode_spc_image_data, write);
+	length += encode_tagged_data(SEQUENCE_TAG, p, file->is_pe? encode_spc_image_data : encode_spc_link, write);
 	length += encode_tagged_data(SEQUENCE_TAG, p, encode_spc_algo, write);
 	
 	return length;
@@ -728,23 +735,23 @@ size_t encode_file_attributes(void *p, bool write)
 	
 	/*
 	//initial order
-	length += encode_tagged_data(SEQUENCE_TAG, &file->file_attribute, encode_attribute, write);
+	length += encode_tagged_data(SEQUENCE_TAG, &file->name_attribute, encode_attribute, write);
 	length += encode_tagged_data(SEQUENCE_TAG, &file->os_attribute, encode_attribute, write);
 	length += encode_tagged_data(SEQUENCE_TAG, p, encode_spc_oid, write);
 	length += encode_tagged_data(SEQUENCE_TAG, p, encode_member_info_oid, write);
 	/*/
 	//Inf2Cat like order
 	length += encode_tagged_data(SEQUENCE_TAG, &file->os_attribute, encode_attribute, write);
-	length += encode_tagged_data(SEQUENCE_TAG, &file->file_attribute, encode_attribute, write);
-	if (file->is_link)
+	length += encode_tagged_data(SEQUENCE_TAG, &file->name_attribute, encode_attribute, write);
+	if (file->is_pe)
 	{
-		length += encode_tagged_data(SEQUENCE_TAG, p, encode_spc_oid, write);
 		length += encode_tagged_data(SEQUENCE_TAG, p, encode_member_info_oid, write);
+		length += encode_tagged_data(SEQUENCE_TAG, p, encode_spc_oid, write);
 	}
 	else
 	{
-		length += encode_tagged_data(SEQUENCE_TAG, p, encode_member_info_oid, write);
 		length += encode_tagged_data(SEQUENCE_TAG, p, encode_spc_oid, write);
+		length += encode_tagged_data(SEQUENCE_TAG, p, encode_member_info_oid, write);
 	}
 	/**/
 	
@@ -764,12 +771,12 @@ size_t encode_one_file(void *p, bool write)
 
 size_t encode_files(void *p, bool write)
 {
-	struct catalog_list_element *elem = p;
+	struct i_list_node *node = p;
 	size_t length = 0;
-	int i;
 	
-	for (i = 0; i < elem->nr_files; i++) {
-		length += encode_tagged_data(SEQUENCE_TAG, &elem->files[i], encode_one_file, write);
+	while (node) {
+		length += encode_tagged_data(SEQUENCE_TAG, node, encode_one_file, write);
+		node = node->next;
 	}
 	
 	return length;
@@ -817,7 +824,7 @@ size_t encode_catalog_list_elements(void *p, bool write)
 	length += encode_tagged_string(OCTET_STRING_TAG, 16, elem->a_hash, write);
 	length += encode_tagged_string(UTC_TIME_TAG, 13, elem->a_time, write);
 	length += encode_tagged_data(SEQUENCE_TAG, p, encode_catalog_list_member_oid, write);
-	length += encode_tagged_data(SEQUENCE_TAG, p, encode_files, write);
+	length += encode_tagged_data(SEQUENCE_TAG, elem->files, encode_files, write);
 	length += encode_tagged_data(ARRAY_TAG, p, encode_global_attributes, write);
 	
 	return length;
@@ -874,6 +881,19 @@ size_t encode_pkcs7_toplevel(void *p, bool write)
 
 void free_allocated(struct pkcs7_toplevel *s)
 {
+	struct a_file *next_file = s->data.cert_trust_list.catalog_list_element->files;
+	struct a_file *this_file;
+	s->data.cert_trust_list.catalog_list_element->files = NULL;
+	while (next_file)
+	{
+		this_file = next_file;
+		next_file = (struct a_file*)this_file->node.next;
+		//free(this_file->name_attribute.value);
+		this_file->name_attribute.value = NULL;
+		this_file->node.next = NULL;
+		free(this_file);
+	}
+	
 	struct oid_data *one_oid = (struct oid_data*)datacache.oids;
 	size_t oids_cnt = sizeof(struct known_oids) / sizeof(struct oid_data);
 	datacache.oids = NULL;
@@ -924,65 +944,86 @@ void __attribute((noreturn)) usage_and_exit(void)
 	exit(1);
 }
 
-void parse_file_arg(char *arg, struct a_file *f, char *os_attr)
+//note: it does modify f_args content (replace colon with null) and creates references to its particular parts
+void parse_file_args(char **f_args, int f_count, char *os_attr, struct a_file **file)
 {
-	char *s = arg;
-	char *fname, *hash;
+	char *arg_p, *fname_p, *hash_p;
+	struct a_file *this_file;
+	//char *fname_buf;
 	int fname_len;
+	bool is_pe;
 	
-	for (; *s && *s != ':'; ++s) ;
-	if (!*s) {
-		usage_and_exit();
-	}
-	fname_len = s - arg;
-	if (fname_len == 0) {
-		fatal("file name can't be empty");
-	}
+	*file = NULL;
 	
-	hash = ++s;
-	
-	for (; *s && *s != ':'; ++s) ;
-	if (s - hash != SHA1_STR_LEN) {
-		fatal("unsupported hash, sha1 expected");
-	}
-	
-	if (*s)
+	while (f_count--)
 	{
-		if (strcmp(":PE", s)) //if not equals
+		arg_p = f_args[f_count];
+		fname_p = arg_p;
+		for (; *arg_p && *arg_p != ':'; ++arg_p) ;
+		if (!*arg_p) {
 			usage_and_exit();
+		}
+		fname_len = arg_p - fname_p;
+		if (fname_len == 0) {
+			fatal("file name can't be empty\n");
+		}
 		
-		f->is_link = false;
-	}
-	else
-		f->is_link = true;
+		hash_p = ++arg_p;
 		
-	
-	fname = malloc(fname_len + 1);
-	if (fname == NULL) {
-		fatal("out of memory");
-	}
-	memcpy(fname, arg, fname_len);
-	fname[fname_len] = '\0';
-	
-	memcpy(f->sha1_str, hash, SHA1_STR_LEN);
-	f->sha1_str[SHA1_STR_LEN] = '\0';
-	for (int i = 0, j = 0; i < SHA1_BYTE_LEN; ++i, j += 2) {
-		f->sha1_bytes[i] = (hexdigit(hash[j]) << 4) + hexdigit(hash[j + 1]);
-	}
-	
-	f->file_attribute.name = "File";
-	f->file_attribute.value = fname;
-	f->file_attribute.encode_as_set = true;
-	f->os_attribute.name = "OSAttr";
-	f->os_attribute.value = os_attr;
-	f->os_attribute.encode_as_set = true;
-	
-	//f->member_info_oid.oid = "1.3.6.1.4.1.311.12.2.2";
-	
-	if (f->is_link == false) {
-		f->guid = "{C689AAB8-8E78-11D0-8C47-00C04FC295EE}";
-	} else {
-		f->guid = "{DE351A42-8E59-11D0-8C47-00C04FC295EE}";
+		for (; *arg_p && *arg_p != ':'; ++arg_p) ;
+		if (arg_p - hash_p != SHA1_STR_LEN) {
+			fatal("unsupported hash, sha1 expected\n");
+		}
+		
+		if (*arg_p)
+		{
+			if (strcmp(":PE", arg_p)) //if not equals
+				usage_and_exit();
+			
+			is_pe = true;
+		}
+		else
+			is_pe = false;
+		
+		this_file = malloc(sizeof(struct a_file));
+		if (this_file == NULL) {
+			fatal("out of memory");
+		}
+		//fname_buf = malloc(fname_len + 1);
+		//if (fname_buf == NULL) {
+		//	fatal("out of memory");
+		//}
+		
+		//memcpy(fname_buf, fname_p, fname_len);
+		//fname_buf[fname_len] = '\0';
+		fname_p[fname_len] = '\0';
+		
+		//memcpy(this_file->sha1_str, hash_p, SHA1_STR_LEN);
+		this_file->sha1_str = hash_p;
+		this_file->sha1_str[SHA1_STR_LEN] = '\0';
+		for (int i = 0, j = 0; i < SHA1_BYTE_LEN; ++i, j += 2) {
+			this_file->sha1_bytes[i] = (hexdigit(hash_p[j]) << 4) + hexdigit(hash_p[j + 1]);
+		}
+		
+		this_file->name_attribute.name = "File";
+		//this_file->name_attribute.value = fname_buf;
+		this_file->name_attribute.value = fname_p;
+		this_file->name_attribute.encode_as_set = true;
+		this_file->os_attribute.name = "OSAttr";
+		this_file->os_attribute.value = os_attr;
+		this_file->os_attribute.encode_as_set = true;
+		
+		//this_file->member_info_oid.oid = "1.3.6.1.4.1.311.12.2.2";
+		this_file->is_pe = is_pe;
+		
+		if (this_file->is_pe) {
+			this_file->guid = "{C689AAB8-8E78-11D0-8C47-00C04FC295EE}";
+		} else {
+			this_file->guid = "{DE351A42-8E59-11D0-8C47-00C04FC295EE}";
+		}
+		
+		this_file->node.next = (struct i_list_node*)*file;
+		*file = this_file;
 	}
 }
 
@@ -1002,7 +1043,7 @@ int main(int argc, char ** argv)
 	char *os_string = "7X64,8X64,_v100_X64";
 	char *os_attr_string = "2:6.1,2:6.2,2:10.0";
 	char *hardware_id = "windrbd";
-	int nr_files;
+	struct a_file *files = NULL;
 	char c;
 	
 	while ((c = getopt(argc, argv, "h:A:O:")) != -1) {
@@ -1023,8 +1064,10 @@ int main(int argc, char ** argv)
 	if (argc <= optind) {
 		usage_and_exit();
 	}
-	nr_files = argc-optind;
-	s.data.cert_trust_list.catalog_list_element = malloc(sizeof(struct catalog_list_element)+sizeof(struct a_file)*nr_files);
+	
+	parse_file_args(argv + optind, argc - optind, os_attr_string, &files);
+	
+	s.data.cert_trust_list.catalog_list_element = malloc(sizeof(struct catalog_list_element));
 	if (s.data.cert_trust_list.catalog_list_element == NULL) {
 		fatal("Out of memory");
 	}
@@ -1037,6 +1080,7 @@ int main(int argc, char ** argv)
 	s.data.cert_trust_list.catalog_list_element->hardware_id.name = "HWID1";
 	s.data.cert_trust_list.catalog_list_element->hardware_id.value = hardware_id;
 	s.data.cert_trust_list.catalog_list_element->hardware_id.encode_as_set = false;
+	s.data.cert_trust_list.catalog_list_element->files = files;
 	s.data.cert_trust_list.catalog_list_element->os_info.name = "OS";
 //	s.data.cert_trust_list.catalog_list_element->os_info.value = "XP_X86,Vista_X86,Vista_X64,7_X86,7_X64,8_X86,8_X64,6_3_X86,6_3_X64,10_X86,10_X64";
 	s.data.cert_trust_list.catalog_list_element->os_info.value = os_string;
@@ -1066,20 +1110,16 @@ int main(int argc, char ** argv)
 	s.data.cert_trust_list.catalog_list_element->catalog_list_oid = &oids.catalog_list_oid;
 	s.data.cert_trust_list.catalog_list_element->catalog_list_member_oid = &oids.catalog_list_member_oid;
 	
-	s.data.cert_trust_list.catalog_list_element->nr_files = nr_files;
-	
-	for (i=0;i<nr_files;i++) {
-		parse_file_arg(argv[i+optind], &s.data.cert_trust_list.catalog_list_element->files[i], os_attr_string);
-	}
-	
 	
 	
 	/* generate binary DER */
 	create_binary_tree(&s);
 	
-	/* free the memory allocated on the heap, not necessary - OS should care about this, mostly it's as an indicator of stack refs */
+	/* free the memory allocated on the heap */
 	free_allocated(&s);
+	files = NULL;
 	
 	/* and write to stdout or so ... */
 	fwrite(buffer, buflen, 1, stdout);
+	free(buffer); buffer = NULL;
 }
