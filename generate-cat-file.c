@@ -20,6 +20,7 @@
 
 #define SHA1_BYTE_LEN	20
 #define SHA1_STR_LEN	SHA1_BYTE_LEN * 2
+#define UTF16_MAX_LEN	1000
 
 
 struct oid_data {
@@ -31,25 +32,26 @@ struct oid_data {
 	size_t length;
 };
 
-struct octet_string {
-	size_t len;
-	void *data;
-};
-
-struct bmp_string {
-	size_t len;
-	void *data;
-};
-
-struct utc_time {
-	char *date_time;  /* 221020135745Z with trailing '\0' */
-};
+// unused
+//struct octet_string {
+//	size_t len;
+//	void *data;
+//};
+//
+//struct bmp_string {
+//	size_t len;
+//	void *data;
+//};
+//
+//struct utc_time {
+//	char *date_time;  /* 221020135745Z with trailing '\0' */
+//};
+//
+//struct array_like_sequence {
+//	int nelem;
+//};
 
 struct null {
-};
-
-struct array_like_sequence {
-	int nelem;
 };
 
 struct algo {
@@ -78,8 +80,8 @@ struct a_file {
 
 struct catalog_list_element {
 	struct oid_data *catalog_list_oid;
-	struct octet_string a_hash;
-	struct utc_time a_time;
+	char *a_hash;
+	char *a_time;
 	struct oid_data *catalog_list_member_oid;
 	
 	struct an_attribute hardware_id;
@@ -452,68 +454,44 @@ size_t encode_known_oid_with_header(struct oid_data *oid, bool write)
 	return oid->length;
 }
 
-size_t encode_octet_string(struct octet_string *s, bool write)
+
+//generic string writer
+size_t encode_tagged_string(char tag, size_t len, char *str, bool write)
 {
-	size_t l2 = encode_tag_and_length(OCTET_STRING_TAG, s->len, write);
+	size_t head_length = encode_tag_and_length(tag, len, write);
 	if (write)
-		return append_to_buffer(s->len, s->data) + l2;
+		return append_to_buffer(len, str) + head_length;
 	
-	return s->len + l2;
+	return len + head_length;
 }
 
-	/* This one is big endian for UFT-16 */
-size_t encode_bmp_string(struct bmp_string *s, bool write)
-{
-	size_t l2 = encode_tag_and_length(BMP_STRING_TAG, s->len, write);
-	if (write)
-		return append_to_buffer(s->len, s->data) + l2;
-	
-	return s->len + l2;
-}
+//string converters
 
-size_t encode_utc_time(struct utc_time *t, bool write)
-{
-	size_t len = strlen(t->date_time);
-	size_t l2 = encode_tag_and_length(UTC_TIME_TAG, len, write);
-	if (write)
-		return append_to_buffer(len, t->date_time) + l2;
-	
-	return len + l2;
-}
-
-#define ARRAY_SIZE(a) (sizeof(a)/sizeof(a[0]))
 size_t encode_string_as_utf16(const char *s, bool write)
 {
 	int i;
-	struct octet_string os;
 	
 	if (write)
 	{
-		unsigned short utf16[1000];
+		unsigned short utf16[UTF16_MAX_LEN];
 		
-		for (i=0;i<ARRAY_SIZE(utf16) && s[i]!='\0';++i) {
+		for (i = 0; i < UTF16_MAX_LEN && s[i] != '\0'; ++i) {
 			utf16[i]=(unsigned char)(s[i]);
 		}
-		if (i < 1000)
+		if (i < UTF16_MAX_LEN)
 		{
 			utf16[i] = 0;
 			++i;
 			
-			os.len = i * sizeof(utf16[0]);
-			os.data = utf16;
-			
-			return encode_octet_string(&os, true);
+			return encode_tagged_string(OCTET_STRING_TAG, i * sizeof(utf16[0]), (char*)utf16, true);
 		}
 	}
 	else
 	{
 		i = strlen(s);
-		if (i < 1000)
+		if (i < UTF16_MAX_LEN)
 		{
-			os.len = (i + 1) * sizeof(unsigned short);
-			os.data = NULL;
-			
-			return encode_octet_string(&os, false);
+			return encode_tagged_string(OCTET_STRING_TAG, (i + 1) * sizeof(unsigned short), NULL, false);
 		}
 	}
 	
@@ -523,33 +501,26 @@ size_t encode_string_as_utf16(const char *s, bool write)
 size_t encode_string_as_utf16_bmp(const char *s, bool write)
 {
 	int i;
-	struct bmp_string os;
 	
 	if (write)
 	{
-		unsigned short utf16[1000];
+		unsigned short utf16[UTF16_MAX_LEN];
 		
-		for (i=0;i<ARRAY_SIZE(utf16) && s[i]!='\0';++i) {
+		for (i = 0; i < UTF16_MAX_LEN && s[i] != '\0'; ++i) {
 			utf16[i]=(unsigned char)(s[i]) << 8;
 		}
 		
 		if (s[i] == '\0')
 		{
-			os.len = i * sizeof(utf16[0]);
-			os.data = utf16;
-			
-			return encode_bmp_string(&os, true);
+			return encode_tagged_string(BMP_STRING_TAG, i * sizeof(utf16[0]), (char*)utf16, true);
 		}
 	}
 	else
 	{
 		i = strlen(s);
-		if (i <= 1000)
+		if (i <= UTF16_MAX_LEN)
 		{
-			os.len = i * sizeof(unsigned short);
-			os.data = NULL;
-			
-			return encode_bmp_string(&os, false);
+			return encode_tagged_string(BMP_STRING_TAG, i * sizeof(unsigned short), NULL, false);
 		}
 	}
 	
@@ -751,11 +722,10 @@ size_t encode_spc_algo_oid(void *p, bool write)
 size_t encode_spc_algo(void *p, bool write)
 {
 	struct a_file *file = p;
-	struct octet_string oc = { SHA1_BYTE_LEN, file->sha1_bytes };
 	size_t length = 0;
 	
 	length += encode_sequence(p, encode_spc_algo_oid, write);
-	length += encode_octet_string(&oc, write);
+	length += encode_tagged_string(OCTET_STRING_TAG, SHA1_BYTE_LEN, file->sha1_bytes, write);
 	
 	return length;
 }
@@ -865,8 +835,8 @@ size_t encode_catalog_list_elements(void *p, bool write)
 	size_t length = 0;
 
 	length += encode_sequence(e, encode_catalog_list_oid, write);
-	length += encode_octet_string(&e->a_hash, write);
-	length += encode_utc_time(&e->a_time, write);
+	length += encode_tagged_string(OCTET_STRING_TAG, 16, e->a_hash, write);
+	length += encode_tagged_string(UTC_TIME_TAG, 13, e->a_time, write);
 	length += encode_sequence(p, encode_catalog_list_member_oid, write);
 	length += encode_sequence(p, encode_files, write);
 	length += encode_array(p, encode_global_attributes, write);
@@ -1083,9 +1053,8 @@ int main(int argc, char ** argv)
 		a_hash[i] = i;
 	
 	s.data.an_int = 1;
-	s.data.cert_trust_list.catalog_list_element->a_hash.len = 16;
-	s.data.cert_trust_list.catalog_list_element->a_hash.data = a_hash;
-	s.data.cert_trust_list.catalog_list_element->a_time.date_time = "230823140713Z";
+	s.data.cert_trust_list.catalog_list_element->a_hash = a_hash;
+	s.data.cert_trust_list.catalog_list_element->a_time = "230823140713Z";
 	s.data.cert_trust_list.catalog_list_element->hardware_id.name = "HWID1";
 	s.data.cert_trust_list.catalog_list_element->hardware_id.value = hardware_id;
 	s.data.cert_trust_list.catalog_list_element->hardware_id.encode_as_set = false;
