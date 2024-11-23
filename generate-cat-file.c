@@ -64,10 +64,19 @@ struct algo {
 	struct null a_null;
 };
 
-struct an_attribute {
+struct an_attribute_data {
 	char *name;
 	char *value;
+};
+
+struct an_attribute {
+	struct an_attribute_data data;
 	bool encode_as_set;	/* SET or OCTET_STRING */
+};
+
+struct a_hwid {
+	struct i_list_node node;
+	struct an_attribute_data data;
 };
 
 struct a_file {
@@ -93,8 +102,8 @@ struct catalog_list_element {
 	struct oid_data *catalog_list_member_oid;
 	
 	struct a_file *files;
+	struct a_hwid *hwids;
 	
-	struct an_attribute hardware_id;
 	struct an_attribute os_info;
 };
 
@@ -602,7 +611,7 @@ size_t encode_algo_sequence(void *p, bool write)
 
 size_t encode_attribute_name_and_value(void *p, bool write)
 {
-	struct an_attribute *attr = p;
+	struct an_attribute_data *attr = p;
 	size_t length = 0;
 	
 	length += encode_string_as_utf16_bmp(attr->name, write);
@@ -833,13 +842,34 @@ size_t encode_catalog_list_oid(void *p, bool write)
 	return encode_known_oid_with_header(&datacache.oids->catalog_list_oid, write);
 }
 
+//specialized version of encode_attribute()
+size_t encode_one_hwid(void *p, bool write)
+{
+	return
+		  encode_known_oid_with_header(&datacache.oids->attribute_name_value_oid, write)
+		+ encode_tagged_data(OCTET_STRING_TAG, p, encode_attribute_sequence, write)
+	;
+}
+
+size_t encode_hwids(struct a_hwid *hwid, bool write)
+{
+	size_t length = 0;
+	
+	while (hwid) {
+		length += encode_tagged_data(SEQUENCE_TAG, &hwid->data, encode_one_hwid, write);
+		hwid = (struct a_hwid*)hwid->node.next;
+	}
+	
+	return length;
+}
+
 size_t encode_global_attributes2(void *p, bool write)
 {
 	struct catalog_list_element *elem = p;
 	size_t length = 0;
 	
 	length += encode_tagged_data(SEQUENCE_TAG, &elem->os_info, encode_attribute, write);
-	length += encode_tagged_data(SEQUENCE_TAG, &elem->hardware_id, encode_attribute, write);
+	length += encode_hwids(elem->hwids, write);
 	
 	return length;
 }
@@ -935,10 +965,24 @@ void free_allocated(struct pkcs7_toplevel *sdat)
 	{
 		this_file = next_file;
 		next_file = (struct a_file*)this_file->node.next;
-		//free(this_file->name_attribute.value);
-		this_file->name_attribute.value = NULL;
+		//free(this_file->name_attribute.data.value);
+		this_file->name_attribute.data.value = NULL;
 		this_file->node.next = NULL;
 		free(this_file);
+	}
+	
+	struct a_hwid *next_hwid = sdat->data.cert_trust_list.catalog_list_element->hwids;
+	struct a_hwid *this_hwid;
+	sdat->data.cert_trust_list.catalog_list_element->hwids = NULL;
+	while (next_hwid)
+	{
+		this_hwid = next_hwid;
+		next_hwid = (struct a_hwid*)this_hwid->node.next;
+		free(this_hwid->data.name);
+		this_hwid->node.next = NULL;
+		this_hwid->data.name = NULL;
+		this_hwid->data.value = NULL;
+		free(this_hwid);
 	}
 	
 	struct oid_data *one_oid = (struct oid_data*)datacache.oids;
@@ -994,8 +1038,9 @@ void create_binary_tree(struct pkcs7_toplevel *sdat)
 
 void __attribute((noreturn)) usage_and_exit(void)
 {
-	fprintf(stderr, "Usage: generate_cat_file [-h <hardware-id>] [-O OS string] [-A OS attribute string] file-with-hash1 [ file-with-hash2 ... ]\n");
+	fprintf(stderr, "Usage: generate_cat_file -h <hardware-ids> [-O OS string] [-A OS attribute string] file-with-hash1 [ file-with-hash2 ... ]\n");
 	fprintf(stderr, "Generates a Microsoft Security Catalog (\".cat\") file.\n");
+	fprintf(stderr, "hardware-ids is comma separated list\n");
 	fprintf(stderr, "file-with-hash has the format filename:sha1-hash-in-hex[:PE]\n");
 	fprintf(stderr, "Use osslsigncode to sign it afterwards.\n");
 	exit(1);
@@ -1062,12 +1107,12 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct a_file **
 			this_file->sha1_bytes[i] = (hexdigit(hash_p[j]) << 4) + hexdigit(hash_p[j + 1]);
 		}
 		
-		this_file->name_attribute.name = "File";
-		//this_file->name_attribute.value = fname_buf;
-		this_file->name_attribute.value = fname_p;
+		this_file->name_attribute.data.name = "File";
+		//this_file->name_attribute.data.value = fname_buf;
+		this_file->name_attribute.data.value = fname_p;
 		this_file->name_attribute.encode_as_set = true;
-		this_file->os_attribute.name = "OSAttr";
-		this_file->os_attribute.value = os_attr;
+		this_file->os_attribute.data.name = "OSAttr";
+		this_file->os_attribute.data.value = os_attr;
 		this_file->os_attribute.encode_as_set = true;
 		
 		//this_file->member_info_oid.oid = "1.3.6.1.4.1.311.12.2.2";
@@ -1084,6 +1129,58 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct a_file **
 	}
 }
 
+#define FUNC_CREATE_HWID_NODE() {\
+	/*create new struct and chain it with previouse
+	//reverse order is based on observed cat files */ \
+	*hwid = malloc(sizeof(struct a_hwid)); \
+	(*hwid)->node.next = (struct i_list_node*)hwid_last; \
+	hwid_last = *hwid; \
+	\
+	/*create buffer, enough to store "HWID" + uint64 (4 + 20) */ \
+	hwid_last->data.name = malloc(0x18); \
+	memcpy(hwid_last->data.name, "HWID", 4); \
+	/*increase hwid number and put it to hwid name */ \
+	itoa(++hwid_num, hwid_last->data.name + 4, 10); \
+	/*store current hwid begin position */ \
+	hwid_last->data.value = hwid_begin; \
+}
+
+//note: it does modify hwids content (replace comma with null) and creates references to its particular parts
+int parse_hwids_arg(char *hwids, struct a_hwid **hwid)
+{
+	struct a_hwid *hwid_last = NULL;
+	char *hwid_begin = hwids;
+	int hwid_num = 0;
+	
+	while (*hwids)
+	{
+		if (*hwids == ',' && hwids > hwid_begin)
+		{
+			FUNC_CREATE_HWID_NODE();
+			
+			//"cut" string to current hwid end
+			*hwids = '\0';
+			//update current position and move position of current hwid begin to it
+			hwid_begin = ++hwids;
+		}
+		else
+			++hwids;
+	}
+	
+	//grab last entry, if any
+	if (hwids > hwid_begin)
+	{
+		FUNC_CREATE_HWID_NODE();
+	}
+	
+	//not inspect much file, but generally atleast one hwid is specified
+	//if hwid-less cat possible - this restriction can be removed
+	if (hwid_last == NULL)
+		fatal("atleast one hardwareID required\n");
+	
+	return hwid_num;
+}
+
 int main(int argc, char **argv)
 {
 	struct pkcs7_toplevel s = { 0 };
@@ -1091,6 +1188,7 @@ int main(int argc, char **argv)
 	
 	struct node_data *root_node = NULL;
 	struct a_file *files = NULL;
+	struct a_hwid *hwids = NULL;
 	
 	/* initialize data structure */
 //	char a_hash[16] = {0xDD, 0x43, 0x67, 0xE3, 0x2B, 0xAB, 0xE1, 0x44, 0xB7, 0xCB, 0xEC, 0x31, 0xCE, 0xB9, 0xD5, 0xA6};
@@ -1103,13 +1201,14 @@ int main(int argc, char **argv)
 	
 	char *os_string = "7X64,8X64,_v100_X64";
 	char *os_attr_string = "2:6.1,2:6.2,2:10.0";
-	char *hardware_id = "windrbd";
+	char *hardware_ids = NULL;
 	char c;
 	
 	while ((c = getopt(argc, argv, "h:A:O:")) != -1) {
 		switch (c) {
 		case 'h':
-			hardware_id = optarg;
+			//hardware_ids = strdup(optarg);
+			hardware_ids = optarg;
 			break;
 		case 'A':
 			os_attr_string = optarg;
@@ -1121,29 +1220,30 @@ int main(int argc, char **argv)
 			usage_and_exit();
 		}
 	}
-	if (argc <= optind) {
+	
+	if (argc <= optind || hardware_ids == NULL) {
 		usage_and_exit();
 	}
 	
+	parse_hwids_arg(hardware_ids, &hwids);
 	parse_file_args(argv + optind, argc - optind, os_attr_string, &files);
 	
 	s.data.cert_trust_list.catalog_list_element = malloc(sizeof(struct catalog_list_element));
 	if (s.data.cert_trust_list.catalog_list_element == NULL) {
 		fatal("out of memory");
 	}
+	
 	for (i=0;i<sizeof(a_hash);i++)
 		a_hash[i] = i;
 	
 	s.data.an_int = 1;
 	s.data.cert_trust_list.catalog_list_element->a_hash = a_hash;
 	s.data.cert_trust_list.catalog_list_element->a_time = "230823140713Z";
-	s.data.cert_trust_list.catalog_list_element->hardware_id.name = "HWID1";
-	s.data.cert_trust_list.catalog_list_element->hardware_id.value = hardware_id;
-	s.data.cert_trust_list.catalog_list_element->hardware_id.encode_as_set = false;
+	s.data.cert_trust_list.catalog_list_element->hwids = hwids;
 	s.data.cert_trust_list.catalog_list_element->files = files;
-	s.data.cert_trust_list.catalog_list_element->os_info.name = "OS";
-//	s.data.cert_trust_list.catalog_list_element->os_info.value = "XP_X86,Vista_X86,Vista_X64,7_X86,7_X64,8_X86,8_X64,6_3_X86,6_3_X64,10_X86,10_X64";
-	s.data.cert_trust_list.catalog_list_element->os_info.value = os_string;
+	s.data.cert_trust_list.catalog_list_element->os_info.data.name = "OS";
+//	s.data.cert_trust_list.catalog_list_element->os_info.data.value = "XP_X86,Vista_X86,Vista_X64,7_X86,7_X64,8_X86,8_X64,6_3_X86,6_3_X64,10_X86,10_X64";
+	s.data.cert_trust_list.catalog_list_element->os_info.data.value = os_string;
 	s.data.cert_trust_list.catalog_list_element->os_info.encode_as_set = false;
 	
 	/* init OIDs cache, actual data will be computed on first access per OID */
@@ -1180,7 +1280,9 @@ int main(int argc, char **argv)
 	/* free the memory allocated on the heap */
 	datacache.node = root_node; //otherwise, all used nodes except the last one would not be freed
 	free_allocated(&s);
-	root_node = NULL; files = NULL;
+	root_node = NULL; files = NULL; hwids = NULL;
+	//free(hardware_ids);
+	//hardware_ids = NULL;
 	
 	/* and write to stdout or so ... */
 	fwrite(buffer, buflen, 1, stdout);
