@@ -5,6 +5,7 @@
 #include <sys/errno.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <time.h>
 
 /* DER encoding */
 
@@ -960,6 +961,8 @@ void free_allocated(struct pkcs7_toplevel *sdat)
 	}
 	
 	
+	free(sdat->data.cert_trust_list.catalog_list_element->a_time);
+	sdat->data.cert_trust_list.catalog_list_element->a_time = NULL;
 	free(sdat->data.cert_trust_list.catalog_list_element);
 }
 
@@ -1002,9 +1005,10 @@ void create_binary_tree(struct pkcs7_toplevel *sdat)
 
 void __attribute((noreturn)) usage_and_exit(void)
 {
-	fprintf(stderr, "Usage: generate_cat_file -h <hardware-ids> [-O OS string] [-A OS attribute string] file-with-hash1 [ file-with-hash2 ... ]\n");
+	fprintf(stderr, "Usage: generate_cat_file -h <hardware-ids> [-O OS string] [-A OS attribute string] [-T generation-time] file-with-hash1 [ file-with-hash2 ... ]\n");
 	fprintf(stderr, "Generates a Microsoft Security Catalog (\".cat\") file.\n");
 	fprintf(stderr, "hardware-ids is comma separated list\n");
+	fprintf(stderr, "generation-time has the format YYmmddHHMMSSZ, Z is constant, means 0 timezone\n");
 	fprintf(stderr, "file-with-hash has the format filename:sha1-hash-in-hex[:PE]\n");
 	fprintf(stderr, "Use osslsigncode to sign it afterwards.\n");
 	exit(1);
@@ -1173,9 +1177,10 @@ int main(int argc, char **argv)
 	char *os_string = "7X64,8X64,_v100_X64";
 	char *os_attr_string = "2:6.1,2:6.2,2:10.0";
 	char *hardware_ids = NULL;
+	char *gen_time = NULL;
 	char c;
 	
-	while ((c = getopt(argc, argv, "h:A:O:")) != -1) {
+	while ((c = getopt(argc, argv, "h:A:O:T:")) != -1) {
 		switch (c) {
 		case 'h':
 			hardware_ids = optarg;
@@ -1186,6 +1191,9 @@ int main(int argc, char **argv)
 		case 'O':
 			os_string = optarg;
 			break;
+		case 'T':
+			gen_time = strdup(optarg); //strdup for avoid complications with freeing
+			break;
 		default:
 			usage_and_exit();
 		}
@@ -1193,6 +1201,16 @@ int main(int argc, char **argv)
 	
 	if (argc <= optind || hardware_ids == NULL) {
 		usage_and_exit();
+	}
+	
+	if (gen_time) {
+		if (strlen(gen_time) != 13 || gen_time[12] != 'Z')
+			usage_and_exit();
+	}
+	else {
+		gen_time = malloc(14);
+		time_t t = time(NULL);
+		strftime(gen_time, 14, "%y%m%d%H%M%SZ", gmtime(&t));
 	}
 	
 	parse_hwids_arg(hardware_ids, &hwids);
@@ -1208,7 +1226,7 @@ int main(int argc, char **argv)
 	
 	s.data.an_int = 1;
 	s.data.cert_trust_list.catalog_list_element->a_hash = a_hash;
-	s.data.cert_trust_list.catalog_list_element->a_time = "230823140713Z";
+	s.data.cert_trust_list.catalog_list_element->a_time = gen_time;
 	s.data.cert_trust_list.catalog_list_element->hwids = hwids;
 	s.data.cert_trust_list.catalog_list_element->files = files;
 	s.data.cert_trust_list.catalog_list_element->os_info.data.name = "OS";
@@ -1255,6 +1273,7 @@ int main(int argc, char **argv)
 	datacache.node = root_node; //otherwise, all used nodes except the last one would not be freed
 	free_allocated(&s);
 	root_node = NULL; files = NULL;
+	gen_time = NULL;
 	hwids = NULL;
 	
 	/* and write to stdout or so ... */

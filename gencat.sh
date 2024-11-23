@@ -57,7 +57,7 @@
 #     Server_v100_ARM64_24H2 - arm 64-bit Windows Server 2025 (not tested + officially the first ARM64 Server)
 
 function usage_and_exit() {
-	echo Usage: "$0 -o <output-file> [-h <hardware-ids>] [-O OS string] [-A OS attribute string] file1 [ file2 ... ]"
+	echo Usage: "$0 -o <output-file> [-h <hardware-ids>] [-O OS string] [-A OS attribute string] [-T generation-time] file1 [ file2 ... ]"
 	echo See comment inside this .sh file for list of OS string and OS attributes
 	exit 1
 }
@@ -68,9 +68,10 @@ OUTPUT_CAT_FILE=-
 HARDWARE_ID=windrbd
 OS_STRING=7X64,8X64,_v100_X64
 OS_ATTR=2:6.1,2:6.2,2:10.0
+GEN_TIME=230823140713Z
 DRY_RUN=0
 
-args=$( getopt do:h:O:A: $* )
+args=$( getopt do:h:O:A:T: $* )
 if [ $? -ne 0 ]
 then
 	usage_and_exit
@@ -103,6 +104,11 @@ do
 			;;
 		-A)
 			OS_ATTR=$2
+			shift
+			shift
+			;;
+		-T)
+			GEN_TIME=$2
 			shift
 			shift
 			;;
@@ -141,13 +147,13 @@ unset IFS
 
 if [ $DRY_RUN -eq 1 ]
 then
-	echo $EXEC_DIR/generate-cat-file -A $OS_ATTR -O $OS_STRING -h $HARDWARE_IDS ${sorted_images[*]}
+	echo $EXEC_DIR/generate-cat-file -T $GEN_TIME -A $OS_ATTR -O $OS_STRING -h $HARDWARE_IDS ${sorted_images[*]}
 	exit 0
 fi
 
 if [ $OUTPUT_CAT_FILE == '-' ]
 then
-	$EXEC_DIR/generate-cat-file -A $OS_ATTR -O $OS_STRING -h $HARDWARE_IDS ${sorted_images[*]}
+	$EXEC_DIR/generate-cat-file -T $GEN_TIME -A $OS_ATTR -O $OS_STRING -h $HARDWARE_IDS ${sorted_images[*]}
 else
-	$EXEC_DIR/generate-cat-file -A $OS_ATTR -O $OS_STRING -h $HARDWARE_IDS ${sorted_images[*]} > $OUTPUT_CAT_FILE
+	$EXEC_DIR/generate-cat-file -T $GEN_TIME -A $OS_ATTR -O $OS_STRING -h $HARDWARE_IDS ${sorted_images[*]} > $OUTPUT_CAT_FILE
 fi
