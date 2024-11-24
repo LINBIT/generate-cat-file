@@ -2,10 +2,25 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
-#include <sys/errno.h>
 #include <ctype.h>
 #include <unistd.h>
 #include <time.h>
+
+#if !defined(_WIN32) && (defined(__unix__) || defined(__unix) || (defined(__APPLE__) && defined(__MACH__)))
+	#include <sys/errno.h>
+#endif
+
+#if defined(_WINDOWS) || defined(_WIN32) || defined(WIN32)
+	#include <fcntl.h>
+	#include <io.h>
+	
+	#define IS_WINDOWS
+	
+	#ifdef _O_BINARY
+		#define HAVE_SETMODE
+	#endif
+#endif
+
 
 /* DER encoding */
 
@@ -1361,6 +1376,16 @@ int main(int argc, char **argv)
 	gen_time = NULL;
 	a_guid = NULL;
 	hwids = NULL;
+	
+#ifdef IS_WINDOWS
+	#ifdef HAVE_SETMODE
+	if (_setmode(_fileno(stdout), _O_BINARY) == -1)
+		fatal("cannot set binary mode for stdout\noutput canceled due to translation(known \"corruption\" in text mode)\nhttps://stackoverflow.com/a/5537079");
+	#else
+	freopen("CON", "wb", stdout);
+	//stdout = fdopen(STDOUT_FILENO, "wb");
+	#endif
+#endif
 	
 	/* and write to stdout or so ... */
 	fwrite(buffer, buflen, 1, stdout);
