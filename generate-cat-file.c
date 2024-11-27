@@ -23,9 +23,10 @@
 #define UTF16_MAX_LEN   1000
 
 
-//kind of interface for linked-list-node-like structs
-struct i_list_node {
-	struct i_list_node *next;
+//linked-list-node
+struct list_node {
+	struct list_node *next;
+	void *data;
 };
 
 struct oid_data {
@@ -74,14 +75,7 @@ struct an_attribute {
 	bool encode_as_set;	/* SET or OCTET_STRING */
 };
 
-struct a_hwid {
-	struct i_list_node node;
-	struct an_attribute_data data;
-};
-
 struct a_file {
-	struct i_list_node node;
-	
 	char *guid;	/* {C689AAB8-8E78-11D0-8C47-00C04FC295EE} */
 	//struct oid_data *member_info_oid; //file is a "hot" struct
 	char *sha1_str; //sha1 string
@@ -101,8 +95,8 @@ struct catalog_list_element {
 	char *a_time;
 	struct oid_data *catalog_list_member_oid;
 	
-	struct a_file *files;
-	struct a_hwid *hwids;
+	struct list_node *files;
+	struct list_node *hwids;
 	
 	struct an_attribute os_info;
 };
@@ -150,7 +144,6 @@ struct known_oids {
 };
 
 struct node_data {
-	struct i_list_node node;
 	size_t length;
 	//int tag;	//mostly used for debugging purpose, but can be for tag match validation (so the length cache isn't so blind)
 };
@@ -159,7 +152,7 @@ struct cache {
 	struct known_oids *oids;
 	//each calculation/write advance this to last visited leaf in current branch
 	//so, on write just after calc for the same branch, store current node before calc and restore it before write
-	struct node_data *node;
+	struct list_node *node;
 };
 
 size_t buflen = 0;
@@ -442,23 +435,30 @@ size_t encode_oid_to_cache(char *oid, char *buf, size_t buf_sz)
 //for any oids; byte form is calculated on each write; may be expensive with "hot" oids
 size_t encode_plain_oid_with_header(char *oid, bool write)
 {
-	struct node_data *this_node = (struct node_data*)datacache.node->node.next;
+	//signature, predictable UB or out-of-style unrolling...
+	//encode_tagged_data(OID_TAG, oid, encode_oid, write);
+	
+	struct list_node *this_node = datacache.node->next;
+	struct node_data *node_data;
 	
 	if (this_node == NULL)
 	{
-		this_node = malloc(sizeof(struct node_data));
-		datacache.node->node.next = (struct i_list_node*)this_node;
-		//this_node->tag = OID_TAG;
-		this_node->node.next = NULL;
-		this_node->length = encode_oid(oid, false);
+		this_node = malloc(sizeof(struct list_node) + sizeof(struct node_data));
+		datacache.node->next = this_node;
+		this_node->next = NULL;
+		this_node->data = this_node + 1;
+		node_data = this_node->data;
+		//node_data->tag = OID_TAG;
+		node_data->length = encode_oid(oid, false);
 	}
 	
+	node_data = this_node->data;
 	datacache.node = this_node;
-	size_t head_length = encode_tag_and_length(OID_TAG, this_node->length, write);
+	size_t head_length = encode_tag_and_length(OID_TAG, node_data->length, write);
 	if (write)
 		return encode_oid(oid, true) + head_length;
 	
-	return this_node->length + head_length;
+	return node_data->length + head_length;
 }
 
 //for known oids; necessary data is calculated on first request and cached inside the oid object for further usage
@@ -469,18 +469,18 @@ size_t encode_known_oid_with_header(struct oid_data *oid, bool write)
 	
 	if (oid->bytes == NULL)
 	{
-		// size of this buffer(256 + 4) is based on
+		// size of this buffer(128 + 4) is based on
 		// max length of oid arc in bytes(3 for local encoder) times max known count of arcs(34)
 		// rounded to nearest power of two
 		// plus max length of length value(4 for local encoder)
-		char oid_buf[0x104];
-		size_t data_length = encode_oid_to_cache(oid->string, oid_buf + 4, 0x100);
-		size_t head_length = 1 + encode_length_to_cache(data_length, oid_buf);
-		oid->length = data_length + head_length;
+		char oid_buf[0x84];
+		size_t data_length = encode_oid_to_cache(oid->string, oid_buf + 4, 0x80);
+		size_t head_length = encode_length_to_cache(data_length, oid_buf);
+		oid->length = data_length + head_length + 1;
 		oid->bytes = malloc(oid->length);
 		oid->bytes[0] = OID_TAG;
 		memcpy(oid->bytes + 1, oid_buf, head_length);
-		memcpy(oid->bytes + head_length, oid_buf + 4, data_length);
+		memcpy(oid->bytes + 1 + head_length, oid_buf + 4, data_length);
 	}
 	
 	if (write)
@@ -515,9 +515,7 @@ size_t encode_string_as_utf16(const char *s, bool write)
 		}
 		if (i < UTF16_MAX_LEN)
 		{
-			utf16[i] = 0;
-			++i;
-			
+			utf16[i++] = 0;
 			return encode_tagged_string(OCTET_STRING_TAG, i * sizeof(utf16[0]), (char*)utf16, true);
 		}
 	}
@@ -566,20 +564,23 @@ size_t encode_string_as_utf16_bmp(const char *s, bool write)
 //generic data encoder
 size_t encode_tagged_data(char tag, void *s, size_t a_fn(void*, bool), bool write)
 {
-	struct node_data *this_node = (struct node_data*)datacache.node->node.next;
+	struct list_node *this_node = datacache.node->next;
+	struct node_data *node_data;
 	
 	if (this_node == NULL)
 	{
-		this_node = malloc(sizeof(struct node_data));
-		datacache.node->node.next = (struct i_list_node*)this_node;
+		this_node = malloc(sizeof(struct list_node) + sizeof(struct node_data));
+		datacache.node->next = this_node;
 		datacache.node = this_node;
-		//this_node->tag = tag;
-		this_node->node.next = NULL;
-		//a_fn may also change datacache.node, so we can't rely on it anymore (it's by design)
-		this_node->length = a_fn(s, false);
+		this_node->next = NULL;
+		this_node->data = this_node + 1;
+		node_data = this_node->data;
+		//node_data->tag = tag;
+		node_data->length = a_fn(s, false);
 	}
 	
-	size_t head_length = encode_tag_and_length(tag, this_node->length, write);
+	node_data = this_node->data;
+	size_t head_length = encode_tag_and_length(tag, node_data->length, write);
 	if (write)
 	{
 		//(re-)set datacache.node to proper reference
@@ -587,7 +588,7 @@ size_t encode_tagged_data(char tag, void *s, size_t a_fn(void*, bool), bool writ
 		return a_fn(s, true) + head_length;
 	}
 	
-	return this_node->length + head_length;
+	return node_data->length + head_length;
 }
 
 
@@ -615,7 +616,12 @@ size_t encode_attribute_name_and_value(void *p, bool write)
 	size_t length = 0;
 	
 	length += encode_string_as_utf16_bmp(attr->name, write);
-	length += encode_integer(268500993, write);
+	//mscat.h
+	//                         CRYPTCAT_ATTR_AUTHENTICATED
+	//                         |  CRYPTCAT_ATTR_DATAASCII
+	//                         |  |   CRYPTCAT_ATTR_NAMEASCII
+	//                         v  v   v
+	length += encode_integer(0x10010001, write);
 	length += encode_string_as_utf16(attr->value, write);
 	
 	return length;
@@ -643,7 +649,8 @@ size_t encode_member_info(void *p, bool write)
 	size_t length = 0;
 	
 	length += encode_string_as_utf16_bmp(file->guid, write);
-	length += encode_integer(512, write);
+	//CryptCATOpen() ms docs : version, can be 0x100, 0x200
+	length += encode_integer(0x200, write);
 	
 	return length;
 }
@@ -814,11 +821,11 @@ size_t encode_one_file(void *p, bool write)
 
 size_t encode_files(void *p, bool write)
 {
-	struct i_list_node *node = p;
+	struct list_node *node = p;
 	size_t length = 0;
 	
 	while (node) {
-		length += encode_tagged_data(SEQUENCE_TAG, node, encode_one_file, write);
+		length += encode_tagged_data(SEQUENCE_TAG, node->data, encode_one_file, write);
 		node = node->next;
 	}
 	
@@ -853,13 +860,13 @@ size_t encode_one_hwid(void *p, bool write)
 	return length;
 }
 
-size_t encode_hwids(struct a_hwid *hwid, bool write)
+size_t encode_hwids(struct list_node *hwid, bool write)
 {
 	size_t length = 0;
 	
 	while (hwid) {
-		length += encode_tagged_data(SEQUENCE_TAG, &hwid->data, encode_one_hwid, write);
-		hwid = (struct a_hwid*)hwid->node.next;
+		length += encode_tagged_data(SEQUENCE_TAG, hwid->data, encode_one_hwid, write);
+		hwid = hwid->next;
 	}
 	
 	return length;
@@ -918,7 +925,7 @@ size_t encode_pkcs7_data(void *p, bool write)
 	struct pkcs7_data *data = p;
 	size_t length = 0;
 	
-	length += encode_integer(data->an_int, write);
+	length += encode_integer(data->an_int, write); //version?
 	//length += encode_tagged_data(SET_TAG, &data->algo, encode_algo_sequence, write);
 	length += encode_empty_set(write);
 	length += encode_tagged_data(SEQUENCE_TAG, &data->cert_trust_list, encode_cert_trust_list, write);
@@ -947,44 +954,53 @@ size_t encode_pkcs7_toplevel(void *p, bool write)
 
 void free_allocated(struct pkcs7_toplevel *sdat)
 {
-	struct node_data *next_node = datacache.node;
-	struct node_data *this_node;
+	struct list_node *next_node;
+	struct list_node *this_node;
+
+	struct node_data *node_data;
+	next_node = datacache.node;
 	datacache.node = NULL;
 	while (next_node)
 	{
 		this_node = next_node;
-		next_node = (struct node_data*)this_node->node.next;
-		this_node->length = 0;
-		//this_node->tag = 0;
-		this_node->node.next = NULL;
+		next_node = this_node->next;
+		node_data = this_node->data;
+		node_data->length = 0;
+		//node_data->tag = 0;
+		this_node->data = NULL;
+		this_node->next = NULL;
 		free(this_node);
 	}
 	
-	struct a_file *next_file = sdat->data.cert_trust_list.catalog_list_element->files;
-	struct a_file *this_file;
+	struct a_file *file_data;
+	next_node = sdat->data.cert_trust_list.catalog_list_element->files;
 	sdat->data.cert_trust_list.catalog_list_element->files = NULL;
-	while (next_file)
+	while (next_node)
 	{
-		this_file = next_file;
-		next_file = (struct a_file*)this_file->node.next;
-		//free(this_file->name_attribute.data.value);
-		this_file->name_attribute.data.value = NULL;
-		this_file->node.next = NULL;
-		free(this_file);
+		this_node = next_node;
+		next_node = this_node->next;
+		file_data = this_node->data;
+		//free(file_data->name_attribute.data.value);
+		file_data->name_attribute.data.value = NULL;
+		this_node->data = NULL;
+		this_node->next = NULL;
+		free(this_node);
 	}
 	
-	struct a_hwid *next_hwid = sdat->data.cert_trust_list.catalog_list_element->hwids;
-	struct a_hwid *this_hwid;
+	struct an_attribute_data *hwid_data;
+	next_node = sdat->data.cert_trust_list.catalog_list_element->hwids;
 	sdat->data.cert_trust_list.catalog_list_element->hwids = NULL;
-	while (next_hwid)
+	while (next_node)
 	{
-		this_hwid = next_hwid;
-		next_hwid = (struct a_hwid*)this_hwid->node.next;
-		free(this_hwid->data.name);
-		this_hwid->node.next = NULL;
-		this_hwid->data.name = NULL;
-		this_hwid->data.value = NULL;
-		free(this_hwid);
+		this_node = next_node;
+		next_node = this_node->next;
+		hwid_data = this_node->data;
+		free(hwid_data->name);
+		hwid_data->name = NULL;
+		hwid_data->value = NULL;
+		this_node->data = NULL;
+		this_node->next = NULL;
+		free(this_node);
 	}
 	
 	struct oid_data *one_oid = (struct oid_data*)datacache.oids;
@@ -1006,12 +1022,13 @@ void create_binary_tree(struct pkcs7_toplevel *sdat)
 {
 	buflen = 0;
 	/* store root_node, as it will be used for buffer size and also as reset point */
-	struct node_data *root_node = datacache.node;
+	struct list_node *root_node = datacache.node;
+	struct node_data *root_data = root_node->data;
 	/* compute sufficient buffer size and store it in root node */
-	root_node->length = encode_pkcs7_toplevel(sdat, false);
+	root_data->length = encode_pkcs7_toplevel(sdat, false);
 	bufsz =
-		  encode_tag_and_length(SEQUENCE_TAG, root_node->length, false)
-		+ root_node->length
+		  encode_tag_and_length(SEQUENCE_TAG, root_data->length, false)
+		+ root_data->length
 	;
 	
 	if (buflen != 0)
@@ -1030,7 +1047,7 @@ void create_binary_tree(struct pkcs7_toplevel *sdat)
 	/* reset cache node to root_node */
 	datacache.node = root_node;
 	/* write data to buffer */
-	encode_tag_and_length(SEQUENCE_TAG, root_node->length, true);
+	encode_tag_and_length(SEQUENCE_TAG, root_data->length, true);
 	encode_pkcs7_toplevel(sdat, true);
 	
 	/* check written data length */
@@ -1049,10 +1066,11 @@ void __attribute((noreturn)) usage_and_exit(void)
 }
 
 //note: it does modify f_args content (replace colon with null) and creates references to its particular parts
-void parse_file_args(char **f_args, int f_count, char *os_attr, struct a_file **file)
+void parse_file_args(char **f_args, int f_count, char *os_attr, struct list_node **file)
 {
 	char *arg_p, *fname_p, *hash_p;
-	struct a_file *this_file;
+	struct list_node *this_file;
+	struct a_file *file_data;
 	//char *fname_buf;
 	int fname_len;
 	bool is_pe;
@@ -1089,10 +1107,13 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct a_file **
 		else
 			is_pe = false;
 		
-		this_file = malloc(sizeof(struct a_file));
+		this_file = malloc(sizeof(struct list_node) + sizeof(struct a_file));
 		if (this_file == NULL) {
 			fatal("out of memory");
 		}
+		this_file->data = this_file + 1;
+		file_data = this_file->data;
+		
 		//fname_buf = malloc(fname_len + 1);
 		//if (fname_buf == NULL) {
 		//	fatal("out of memory");
@@ -1102,31 +1123,31 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct a_file **
 		//fname_buf[fname_len] = '\0';
 		fname_p[fname_len] = '\0';
 		
-		//memcpy(this_file->sha1_str, hash_p, SHA1_STR_LEN);
-		this_file->sha1_str = hash_p;
-		this_file->sha1_str[SHA1_STR_LEN] = '\0';
+		//memcpy(file_data->sha1_str, hash_p, SHA1_STR_LEN);
+		file_data->sha1_str = hash_p;
+		file_data->sha1_str[SHA1_STR_LEN] = '\0';
 		for (int i = 0, j = 0; i < SHA1_BYTE_LEN; ++i, j += 2) {
-			this_file->sha1_bytes[i] = (hexdigit(hash_p[j]) << 4) + hexdigit(hash_p[j + 1]);
+			file_data->sha1_bytes[i] = (hexdigit(hash_p[j]) << 4) + hexdigit(hash_p[j + 1]);
 		}
 		
-		this_file->name_attribute.data.name = "File";
-		//this_file->name_attribute.data.value = fname_buf;
-		this_file->name_attribute.data.value = fname_p;
-		this_file->name_attribute.encode_as_set = true;
-		this_file->os_attribute.data.name = "OSAttr";
-		this_file->os_attribute.data.value = os_attr;
-		this_file->os_attribute.encode_as_set = true;
+		file_data->name_attribute.data.name = "File";
+		//file_data->name_attribute.data.value = fname_buf;
+		file_data->name_attribute.data.value = fname_p;
+		file_data->name_attribute.encode_as_set = true;
+		file_data->os_attribute.data.name = "OSAttr";
+		file_data->os_attribute.data.value = os_attr;
+		file_data->os_attribute.encode_as_set = true;
 		
-		//this_file->member_info_oid.oid = "1.3.6.1.4.1.311.12.2.2";
-		this_file->is_pe = is_pe;
+		//file_data->member_info_oid.oid = "1.3.6.1.4.1.311.12.2.2";
+		file_data->is_pe = is_pe;
 		
-		if (this_file->is_pe) {
-			this_file->guid = "{C689AAB8-8E78-11D0-8C47-00C04FC295EE}";
+		if (file_data->is_pe) {
+			file_data->guid = "{C689AAB8-8E78-11D0-8C47-00C04FC295EE}";
 		} else {
-			this_file->guid = "{DE351A42-8E59-11D0-8C47-00C04FC295EE}";
+			file_data->guid = "{DE351A42-8E59-11D0-8C47-00C04FC295EE}";
 		}
 		
-		this_file->node.next = (struct i_list_node*)*file;
+		this_file->next = *file;
 		*file = this_file;
 	}
 }
@@ -1134,23 +1155,27 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct a_file **
 #define FUNC_CREATE_HWID_NODE() {\
 	/*create new struct and chain it with previouse
 	//reverse order is based on observed cat files */ \
-	*hwid = malloc(sizeof(struct a_hwid)); \
-	(*hwid)->node.next = (struct i_list_node*)hwid_last; \
+	*hwid = malloc(sizeof(struct list_node) + sizeof(struct an_attribute_data)); \
+	if (*hwid == NULL) fatal("out of memory"); \
+	(*hwid)->next = hwid_last; \
 	hwid_last = *hwid; \
+	hwid_last->data = hwid_last + 1; \
+	hwid_data = hwid_last->data; \
 	\
 	/*create buffer, enough to store "HWID" + uint64 (4 + 20) */ \
-	hwid_last->data.name = malloc(0x18); \
-	memcpy(hwid_last->data.name, "HWID", 4); \
+	hwid_data->name = malloc(0x18); \
+	memcpy(hwid_data->name, "HWID", 4); \
 	/*increase hwid number and put it to hwid name */ \
-	itoa(++hwid_num, hwid_last->data.name + 4, 10); \
+	itoa(++hwid_num, hwid_data->name + 4, 10); \
 	/*store current hwid begin position */ \
-	hwid_last->data.value = hwid_begin; \
+	hwid_data->value = hwid_begin; \
 }
 
 //note: it does modify hwids content (replace comma with null) and creates references to its particular parts
-int parse_hwids_arg(char *hwids, struct a_hwid **hwid)
+int parse_hwids_arg(char *hwids, struct list_node **hwid)
 {
-	struct a_hwid *hwid_last = NULL;
+	struct list_node *hwid_last = NULL;
+	struct an_attribute_data *hwid_data;
 	char *hwid_begin = hwids;
 	int hwid_num = 0;
 	
@@ -1188,9 +1213,9 @@ int main(int argc, char **argv)
 	struct pkcs7_toplevel s = { 0 };
 	struct known_oids oids = { 0 };
 	
-	struct node_data *root_node = NULL;
-	struct a_file *files = NULL;
-	struct a_hwid *hwids = NULL;
+	struct list_node *root_node = NULL;
+	struct list_node *files = NULL;
+	struct list_node *hwids = NULL;
 	
 	/* initialize data structure */
 //	char a_hash[16] = {0xDD, 0x43, 0x67, 0xE3, 0x2B, 0xAB, 0xE1, 0x44, 0xB7, 0xCB, 0xEC, 0x31, 0xCE, 0xB9, 0xD5, 0xA6};
@@ -1272,7 +1297,8 @@ int main(int argc, char **argv)
 	s.data.cert_trust_list.catalog_list_element->catalog_list_member_oid = &oids.catalog_list_member_oid;
 	
 	//create root node, that will be used in create_binary_tree()
-	root_node = calloc(1, sizeof(struct node_data));
+	root_node = calloc(1, sizeof(struct list_node) + sizeof(struct node_data));
+	root_node->data = root_node + 1;
 	datacache.node = root_node;
 	
 	
@@ -1282,7 +1308,8 @@ int main(int argc, char **argv)
 	/* free the memory allocated on the heap */
 	datacache.node = root_node; //otherwise, all used nodes except the last one would not be freed
 	free_allocated(&s);
-	root_node = NULL; files = NULL; hwids = NULL;
+	root_node = NULL; files = NULL;
+	hwids = NULL;
 	//free(hardware_ids);
 	//hardware_ids = NULL;
 	
