@@ -92,7 +92,7 @@ struct a_file {
 
 struct catalog_list_element {
 	struct oid_data *catalog_list_oid;
-	char *a_hash;
+	char *a_guid;
 	char *a_time;
 	struct oid_data *catalog_list_member_oid;
 	
@@ -870,7 +870,7 @@ size_t encode_catalog_list_elements(void *p, bool write)
 	size_t length = 0;
 	
 	length += encode_tagged_data(SEQUENCE_TAG, p, encode_catalog_list_oid, write);
-	length += encode_tagged_string(OCTET_STRING_TAG, 16, elem->a_hash, write);
+	length += encode_tagged_string(OCTET_STRING_TAG, 16, elem->a_guid, write);
 	length += encode_tagged_string(UTC_TIME_TAG, 13, elem->a_time, write);
 	length += encode_tagged_data(SEQUENCE_TAG, p, encode_catalog_list_member_oid, write);
 	length += encode_tagged_data(SEQUENCE_TAG, elem->files, encode_files, write);
@@ -989,10 +989,12 @@ void free_allocated(struct pkcs7_toplevel *sdat)
 		one_oid->length = 0;
 		++one_oid;
 	}
-	
-	
 	free(sdat->data.cert_trust_list.catalog_list_element->a_time);
 	sdat->data.cert_trust_list.catalog_list_element->a_time = NULL;
+
+	free(sdat->data.cert_trust_list.catalog_list_element->a_guid);
+	sdat->data.cert_trust_list.catalog_list_element->a_guid = NULL;
+
 	free(sdat->data.cert_trust_list.catalog_list_element);
 }
 
@@ -1035,13 +1037,96 @@ void create_binary_tree(struct pkcs7_toplevel *sdat)
 
 void __attribute((noreturn)) usage_and_exit(void)
 {
-	fprintf(stderr, "Usage: generate_cat_file -h <hardware-ids> [-O OS string] [-A OS attribute string] [-T <generation-time>] file-with-hash1 [ file-with-hash2 ... ]\n");
+	fprintf(stderr, "Usage: generate_cat_file -h <hardware-ids> [-O OS string] [-A OS attribute string] [-G <cat-guid>] [-T <generation-time>] file-with-hash1 [ file-with-hash2 ... ]\n");
 	fprintf(stderr, "Generates a Microsoft Security Catalog (\".cat\") file.\n");
 	fprintf(stderr, "hardware-ids is comma separated list\n");
 	fprintf(stderr, "generation-time has the format YYmmddHHMMSSZ, Z is constant, means 0 timezone\n");
 	fprintf(stderr, "file-with-hash has the format filename:sha1-hash-in-hex[:PE]\n");
 	fprintf(stderr, "Use osslsigncode to sign it afterwards.\n");
 	exit(1);
+}
+
+char* generate_pseudo_GUID_bytes()
+{
+	char *a_guid = malloc(0x10);
+	float rf_num;
+	int *ri_num = (int*)&rf_num; //float "projection"
+	time_t guid_time = time(NULL);
+	srand(guid_time);
+	//5 floats as ints xor-ed with overlap
+	//this divisions only to get more scattered bits, divisors are just random numbers
+	rf_num = rand() / 0.73; *(int*)(a_guid + 0xC) ^= *ri_num;
+	rf_num = rand() / 0.61; *(int*)(a_guid + 0x9) ^= *ri_num;
+	rf_num = rand() / 0.98; *(int*)(a_guid + 0x6) ^= *ri_num;
+	rf_num = rand() / 0.24; *(int*)(a_guid + 0x3) ^= *ri_num;
+	rf_num = rand() / 0.35; *(int*)(a_guid + 0x0) ^= *ri_num;
+	
+	//xor time
+	*(unsigned long long*)a_guid ^= (unsigned long long)guid_time << 0x10;
+	
+	//set certain bits
+	a_guid[0x7] = 0x40 | (a_guid[0x7] & 0x0F); //ver 4, note: modified byte is a byte 8 instead of 7 - SM things
+	a_guid[0x8] = 0x80 | (a_guid[0x8] & 0x3F); //var 1
+	
+	return a_guid;
+}
+
+char* validate_GUID_str(char *guid_str)
+{
+	size_t guid_str_len = strlen(guid_str);
+	char guid_version, guid_variation;
+	int dash_len = 0;
+	
+	switch (guid_str_len)
+	{
+		case 0x26: // {00000000-0000-4000-8000-000000000000} - windows format
+			if (guid_str[0x00] != '{' || guid_str[guid_str_len - 1] != '}')
+				fatal("invalid GUID format");
+			++guid_str; //skip opened curly brace and intentional fall to the next branch (0x24) as this two formats only differ by wrapping in curly braces
+			
+		case 0x24: // 00000000-0000-4000-8000-000000000000 - general format
+			if (guid_str[0x08] != '-' || guid_str[0x0D] != '-' || guid_str[0x12] != '-' || guid_str[0x17] != '-')
+				fatal("invalid GUID format");
+			guid_version = guid_str[0x0E];
+			guid_variation = hexdigit(guid_str[0x13]);
+			dash_len = 1;
+			break;
+		case 0x20: // 00000000000040008000000000000000 - dashless format
+			guid_version = guid_str[0x0C];
+			guid_variation = hexdigit(guid_str[0x10]);
+			break;
+		default:
+			fatal("GUID must be a UUID string of length 32(dashless format) or 36(general format) or 38(windows format)");
+	}
+	
+	if (guid_version != '4' || (guid_variation & 0x0C) != 0x08)
+		fatal("GUID must be version 4 variation 1");
+	
+	//weird SmallMushy order
+	int i = 8;
+	char *a_guid = malloc(0x10);
+	a_guid[0x3] = (hexdigit(guid_str[0]) << 4) + hexdigit(guid_str[1]); guid_str += 2;
+	a_guid[0x2] = (hexdigit(guid_str[0]) << 4) + hexdigit(guid_str[1]); guid_str += 2;
+	a_guid[0x1] = (hexdigit(guid_str[0]) << 4) + hexdigit(guid_str[1]); guid_str += 2;
+	a_guid[0x0] = (hexdigit(guid_str[0]) << 4) + hexdigit(guid_str[1]); guid_str += 2;
+	guid_str += dash_len;
+	a_guid[0x5] = (hexdigit(guid_str[0]) << 4) + hexdigit(guid_str[1]); guid_str += 2;
+	a_guid[0x4] = (hexdigit(guid_str[0]) << 4) + hexdigit(guid_str[1]); guid_str += 2;
+	guid_str += dash_len;
+	a_guid[0x7] = 0x40 + hexdigit(guid_str[1]); guid_str += 2;
+	a_guid[0x6] = (hexdigit(guid_str[0]) << 4) + hexdigit(guid_str[1]); guid_str += 2;
+	guid_str += dash_len;
+	a_guid[i++] = (guid_variation << 4) + hexdigit(guid_str[1]); guid_str += 2;
+	a_guid[i++] = (hexdigit(guid_str[0]) << 4) + hexdigit(guid_str[1]); guid_str += 2;
+	guid_str += dash_len;
+	a_guid[i++] = (hexdigit(guid_str[0]) << 4) + hexdigit(guid_str[1]); guid_str += 2;
+	a_guid[i++] = (hexdigit(guid_str[0]) << 4) + hexdigit(guid_str[1]); guid_str += 2;
+	a_guid[i++] = (hexdigit(guid_str[0]) << 4) + hexdigit(guid_str[1]); guid_str += 2;
+	a_guid[i++] = (hexdigit(guid_str[0]) << 4) + hexdigit(guid_str[1]); guid_str += 2;
+	a_guid[i++] = (hexdigit(guid_str[0]) << 4) + hexdigit(guid_str[1]); guid_str += 2;
+	a_guid[i++] = (hexdigit(guid_str[0]) << 4) + hexdigit(guid_str[1]); guid_str += 2;
+	
+	return a_guid;
 }
 
 //note: it does modify f_args content (replace colon with null) and creates references to its particular parts
@@ -1197,22 +1282,13 @@ int main(int argc, char **argv)
 	struct list_node *files = NULL;
 	struct list_node *hwids = NULL;
 	
-	/* initialize data structure */
-//	char a_hash[16] = {0xDD, 0x43, 0x67, 0xE3, 0x2B, 0xAB, 0xE1, 0x44, 0xB7, 0xCB, 0xEC, 0x31, 0xCE, 0xB9, 0xD5, 0xA6};
-//	char a_hash[16] = {0xEF, 0xAB, 0xFC, 0x01, 0x4F, 0xD8, 0x47, 0x42, 0xA0, 0x0B, 0x7C, 0x78, 0x8E, 0x6D, 0xD1, 0xC1};
-// this is correct:
-	// char a_hash[16] = {0x58, 0x72, 0xA5, 0x5B, 0xFE, 0xF3, 0xCD, 0x46, 0x91, 0x3C, 0xEF, 0x00, 0xC7, 0x7A, 0x97, 0x69};
-	// char a_hash[16] = {0x59, 0x72, 0xA5, 0x5B, 0xFE, 0xF3, 0xCD, 0x46, 0x91, 0x3C, 0xEF, 0x00, 0xC7, 0x7A, 0x97, 0x69};
-	char a_hash[16];
-	int i;
-	
 	char *os_string = "7X64,8X64,_v100_X64";
 	char *os_attr_string = "2:6.1,2:6.2,2:10.0";
 	char *hardware_ids = NULL;
 	char *gen_time = NULL;
+	char *a_guid = NULL;
 	char c;
-	
-	while ((c = getopt(argc, argv, "h:A:O:T:")) != -1) {
+	while ((c = getopt(argc, argv, "h:A:O:T:G:")) != -1) {
 		switch (c) {
 		case 'h':
 			//hardware_ids = strdup(optarg);
@@ -1226,6 +1302,9 @@ int main(int argc, char **argv)
 			break;
 		case 'T':
 			gen_time = strdup(optarg); //strdup for avoid complications with freeing
+			break;
+		case 'G':
+			a_guid = validate_GUID_str(optarg);
 			break;
 		default:
 			usage_and_exit();
@@ -1254,10 +1333,12 @@ int main(int argc, char **argv)
 		fatal("out of memory");
 	}
 	
-	for (i=0;i<sizeof(a_hash);i++)
-		a_hash[i] = i;
+	//generate pseudo guid if not provided
+	if (a_guid == NULL)
+		a_guid = generate_pseudo_GUID_bytes();
 	
 	s.data.an_int = 1;
+	s.data.cert_trust_list.catalog_list_element->a_guid = a_guid;
 	s.data.cert_trust_list.catalog_list_element->a_hash = a_hash;
 	s.data.cert_trust_list.catalog_list_element->a_time = gen_time;
 	s.data.cert_trust_list.catalog_list_element->hwids = hwids;
@@ -1304,6 +1385,7 @@ int main(int argc, char **argv)
 	free_allocated(&s);
 	root_node = NULL; files = NULL;
 	gen_time = NULL;
+	a_guid = NULL;
 	hwids = NULL;
 	//free(hardware_ids);
 	//hardware_ids = NULL;
