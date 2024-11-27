@@ -460,18 +460,18 @@ size_t encode_known_oid_with_header(struct oid_data *oid, bool write)
 	
 	if (oid->bytes == NULL)
 	{
-		// size of this buffer(256 + 4) is based on
+		// size of this buffer(128 + 4) is based on
 		// max length of oid arc in bytes(3 for local encoder) times max known count of arcs(34)
 		// rounded to nearest power of two
 		// plus max length of length value(4 for local encoder)
-		char oid_buf[0x104];
-		size_t data_length = encode_oid_to_cache(oid->string, oid_buf + 4, 0x100);
-		size_t head_length = 1 + encode_length_to_cache(data_length, oid_buf);
-		oid->length = data_length + head_length;
+		char oid_buf[0x84];
+		size_t data_length = encode_oid_to_cache(oid->string, oid_buf + 4, 0x80);
+		size_t head_length = encode_length_to_cache(data_length, oid_buf);
+		oid->length = data_length + head_length + 1;
 		oid->bytes = malloc(oid->length);
 		oid->bytes[0] = OID_TAG;
 		memcpy(oid->bytes + 1, oid_buf, head_length);
-		memcpy(oid->bytes + head_length, oid_buf + 4, data_length);
+		memcpy(oid->bytes + 1 + head_length, oid_buf + 4, data_length);
 	}
 	
 	if (write)
