@@ -199,38 +199,36 @@ size_t encode_empty_set(bool write)
 
 size_t encode_integer(int i, bool write)
 {
-	char sign = 0;
-	
-	if (i < 0) {
-		i = -i;
-		sign = 0x80;
-	}
+	//-128 and 128 (or -1 and 255) both can be encoded in one byte
+	//read 8.3.2 and 8.3.3 of X.690, take account of NOTE for 8.3.2
+	//not full two's complement conversion, on storing the original value is used
+	int tmp = i < 0? ~i : i;
 	
 	if (write)
 	{
 		char int_buf[6] = { INTEGER_TAG, };
 		
-		if (i < 0x80) {
+		if (tmp < 0x80) {
 			int_buf[1] = 1;	/* length (without header) */
-			int_buf[2] = i | sign;
+			int_buf[2] = i & 0xff;
 			return append_to_buffer(3, int_buf);
 		}
-		if (i < 0x8000) {
+		if (tmp < 0x8000) {
 			int_buf[1] = 2;	/* length */
-			int_buf[2] = (i >> 8) | sign;
+			int_buf[2] = (i >> 8) & 0xff;
 			int_buf[3] = i & 0xff;
 			return append_to_buffer(4, int_buf);
 		}
-		if (i < 0x800000) {
+		if (tmp < 0x800000) {
 			int_buf[1] = 3;	/* length */
-			int_buf[2] = (i >> 16) | sign;
+			int_buf[2] = (i >> 16) & 0xff;
 			int_buf[3] = (i >> 8) & 0xff;
 			int_buf[4] = i & 0xff;
 			return append_to_buffer(5, int_buf);
 		}
-		if (i < 0x80000000) {
+		if (tmp < 0x80000000) {
 			int_buf[1] = 4;	/* length */
-			int_buf[2] = (i >> 24) | sign;
+			int_buf[2] = (i >> 24) & 0xff;
 			int_buf[3] = (i >> 16) & 0xff;
 			int_buf[4] = (i >> 8) & 0xff;
 			int_buf[5] = i & 0xff;
@@ -239,13 +237,13 @@ size_t encode_integer(int i, bool write)
 	}
 	else
 	{
-		if (i < 0x80)
+		if (tmp < 0x80)
 			return 3;
-		if (i < 0x8000)
+		if (tmp < 0x8000)
 			return 4;
-		if (i < 0x800000)
+		if (tmp < 0x800000)
 			return 5;
-		if (i < 0x80000000)
+		if (tmp < 0x80000000)
 			return 6;
 	}
 	fatal("can't encode this integer\n");
