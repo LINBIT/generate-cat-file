@@ -845,10 +845,12 @@ size_t encode_catalog_list_oid(void *p, bool write)
 //specialized version of encode_attribute()
 size_t encode_one_hwid(void *p, bool write)
 {
-	return
-		  encode_known_oid_with_header(&datacache.oids->attribute_name_value_oid, write)
-		+ encode_tagged_data(OCTET_STRING_TAG, p, encode_attribute_sequence, write)
-	;
+	size_t length = 0;
+
+	length += encode_known_oid_with_header(&datacache.oids->attribute_name_value_oid, write);
+	length += encode_tagged_data(OCTET_STRING_TAG, p, encode_attribute_sequence, write);
+
+	return length;
 }
 
 size_t encode_hwids(struct a_hwid *hwid, bool write)
