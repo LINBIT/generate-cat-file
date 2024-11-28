@@ -1035,7 +1035,7 @@ void create_binary_tree(struct pkcs7_toplevel *sdat)
 
 void __attribute((noreturn)) usage_and_exit(void)
 {
-	fprintf(stderr, "Usage: generate_cat_file -h <hardware-ids> [-O OS string] [-A OS attribute string] [-T generation-time] file-with-hash1 [ file-with-hash2 ... ]\n");
+	fprintf(stderr, "Usage: generate_cat_file -h <hardware-ids> [-O OS string] [-A OS attribute string] [-T <generation-time>] file-with-hash1 [ file-with-hash2 ... ]\n");
 	fprintf(stderr, "Generates a Microsoft Security Catalog (\".cat\") file.\n");
 	fprintf(stderr, "hardware-ids is comma separated list\n");
 	fprintf(stderr, "generation-time has the format YYmmddHHMMSSZ, Z is constant, means 0 timezone\n");
