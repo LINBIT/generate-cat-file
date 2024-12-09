@@ -679,43 +679,20 @@ size_t encode_spc_image_data(void *p, bool write)
 	// <<<obsolete>>>: vanila         vv                                  vv          vv          vv |  value utf-16-bmp, to the end
 	char image_data[0x28] = { 0x30, 0x26, 0x03, 0x02, 0x05, 0xA0, 0xA0, 0x20, 0xA2, 0x1E, 0x80, 0x1C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x4F, 0x00, 0x62, 0x00, 0x73, 0x00, 0x6F, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x74, 0x00, 0x65, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E };
 	
-	return 
-		length + append_to_buffer(sizeof(image_data), image_data);
-	/*/
-	if (!write)
-		return length + 0x1A;
-	
-	// zaklebt: hacked catgen         vv                                  vv          vv          vv |  value utf-16-bmp, to the end
-	char image_data[0x1A] = { 0x30, 0x18, 0x03, 0x02, 0x05, 0xA0, 0xA0, 0x12, 0xA2, 0x10, 0x80, 0x0E, 0x00, 0x5A, 0x00, 0x61, 0x00, 0x6B, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x62, 0x00, 0x74 };
-	
-	return 
-		length + append_to_buffer(sizeof(image_data), image_data);
-	/**/
+	return length + append_to_buffer(sizeof(image_data), image_data);
 }
 
 size_t encode_spc_link(void *p, bool write)
 {
 	size_t length = encode_known_oid_with_header(&datacache.oids->spc_link_oid, write);
 	
-	//*
 	if (!write)
 		return length + 0x20;
 	
 	// <<<obsolete>>>: vanila        vv          vv |  value utf-16-bmp, to the end
 	char link_data[0x20] = { 0xA2, 0x1E, 0x80, 0x1C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x3C, 0x00, 0x4F, 0x00, 0x62, 0x00, 0x73, 0x00, 0x6F, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x74, 0x00, 0x65, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E };
 	
-	return
-		length + append_to_buffer(sizeof(link_data), link_data);
-	/*/
-	if (!write)
-		return length + 0x12;
-	
-	// zaklebt: hacked catgen        vv          vv |  value utf-16-bmp, to the end
-	char link_data[0x12] = { 0xA2, 0x10, 0x80, 0x0E, 0x00, 0x7A, 0x00, 0x61, 0x00, 0x6B, 0x00, 0x6C, 0x00, 0x65, 0x00, 0x62, 0x00, 0x74 };
-	
-	return
-		length + append_to_buffer(sizeof(link_data), link_data);
-	/**/
+	return length + append_to_buffer(sizeof(link_data), link_data);
 }
 
 int hexdigit(char c)
@@ -1164,7 +1141,8 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct list_node
 	hwid_data->name = malloc(0x18); \
 	memcpy(hwid_data->name, "HWID", 4); \
 	/*increase hwid number and put it to hwid name */ \
-	itoa(++hwid_num, hwid_data->name + 4, 10); \
+	++hwid_num; \
+	sprintf(hwid_data->name + 4, "%d", hwid_num); \
 	/*store current hwid begin position */ \
 	hwid_data->value = hwid_begin; \
 }
