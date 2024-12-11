@@ -4,13 +4,36 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#if defined(_WINDOWS) || defined(_WIN32) || defined(WIN32)
+	#include <fcntl.h>
+	#include <io.h>
+
+	#define IS_WINDOWS
+#endif
+
 char *read_file(const char *fname, long *size_return)
 {
 	char *buffer;
 	long file_size;
 	FILE *f;
 
+#ifdef IS_WINDOWS
+	#ifdef _O_BINARY
+	if (_setmode(_fileno(stdout), _O_BINARY) == -1)
+	#endif
+	{
+		fprintf(stderr, "cannot set binary mode for stdout\noperation canceled due to translation(known \"corruption\" in text mode)\nhttps://stackoverflow.com/a/5537079");
+		exit(1);
+	}
+	f = fopen(fname, "rb");
+
+#else  /* not IS_WINDOWS */
+
 	f = fopen(fname, "r");
+
+#endif /* IS_WINDOWS */
+
+
 	if (f == NULL) {
 		perror("opening image file");
 		return NULL;

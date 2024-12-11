@@ -2,9 +2,20 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
-#include <sys/errno.h>
 #include <ctype.h>
 #include <unistd.h>
+
+#if !defined(_WIN32) && (defined(__unix__) || defined(__unix) || (defined(__APPLE__) && defined(__MACH__)))
+	#include <sys/errno.h>
+#endif
+
+#if defined(_WINDOWS) || defined(_WIN32) || defined(WIN32)
+	#include <fcntl.h>
+	#include <io.h>
+	
+	#define IS_WINDOWS
+#endif
+
 
 /* DER encoding */
 
@@ -1186,6 +1197,17 @@ int parse_hwids_arg(char *hwids, struct list_node **hwid)
 
 int main(int argc, char **argv)
 {
+#ifdef IS_WINDOWS
+	#ifdef _O_BINARY
+	if (_setmode(_fileno(stdout), _O_BINARY) == -1)
+	#endif
+	{
+		fatal("cannot set binary mode for stdout\noperation canceled due to translation(known \"corruption\" in text mode)\nhttps://stackoverflow.com/a/5537079");
+	}
+	
+#endif /* IS_WINDOWS */
+	
+	
 	struct pkcs7_toplevel s = { 0 };
 	struct known_oids oids = { 0 };
 	
