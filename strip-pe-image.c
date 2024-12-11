@@ -9,10 +9,6 @@
 	#include <io.h>
 
 	#define IS_WINDOWS
-
-	#ifdef _O_BINARY
-		#define HAVE_SETMODE
-	#endif
 #endif
 
 char *read_file(const char *fname, long *size_return)
@@ -22,20 +18,21 @@ char *read_file(const char *fname, long *size_return)
 	FILE *f;
 
 #ifdef IS_WINDOWS
-	#ifdef HAVE_SETMODE
+	#ifdef _O_BINARY
 	if (_setmode(_fileno(stdout), _O_BINARY) == -1)
+	#endif
 	{
-		fprintf(stderr, "cannot set binary mode for stdout\noutput canceled due to translation(known \"corruption\" in text mode)\nhttps://stackoverflow.com/a/5537079");
+		fprintf(stderr, "cannot set binary mode for stdout\noperation canceled due to translation(known \"corruption\" in text mode)\nhttps://stackoverflow.com/a/5537079");
 		exit(1);
 	}
-	#else
-	freopen("CON", "wb", stdout);
-	//stdout = fdopen(STDOUT_FILENO, "wb");
-	#endif
 	f = fopen(fname, "rb");
-#else
+
+#else  /* not IS_WINDOWS */
+
 	f = fopen(fname, "r");
-#endif
+
+#endif /* IS_WINDOWS */
+
 
 	if (f == NULL) {
 		perror("opening image file");
