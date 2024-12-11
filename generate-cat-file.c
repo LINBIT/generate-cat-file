@@ -15,10 +15,6 @@
 	#include <io.h>
 	
 	#define IS_WINDOWS
-	
-	#ifdef _O_BINARY
-		#define HAVE_SETMODE
-	#endif
 #endif
 
 
@@ -1290,6 +1286,17 @@ int parse_hwids_arg(char *hwids, struct list_node **hwid)
 
 int main(int argc, char **argv)
 {
+#ifdef IS_WINDOWS
+	#ifdef _O_BINARY
+	if (_setmode(_fileno(stdout), _O_BINARY) == -1)
+	#endif
+	{
+		fatal("cannot set binary mode for stdout\noperation canceled due to translation(known \"corruption\" in text mode)\nhttps://stackoverflow.com/a/5537079");
+	}
+	
+#endif /* IS_WINDOWS */
+	
+	
 	struct pkcs7_toplevel s = { 0 };
 	struct known_oids oids = { 0 };
 	
@@ -1404,16 +1411,6 @@ int main(int argc, char **argv)
 	hwids = NULL;
 	//free(hardware_ids);
 	//hardware_ids = NULL;
-	
-#ifdef IS_WINDOWS
-	#ifdef HAVE_SETMODE
-	if (_setmode(_fileno(stdout), _O_BINARY) == -1)
-		fatal("cannot set binary mode for stdout\noutput canceled due to translation(known \"corruption\" in text mode)\nhttps://stackoverflow.com/a/5537079");
-	#else
-	freopen("CON", "wb", stdout);
-	//stdout = fdopen(STDOUT_FILENO, "wb");
-	#endif
-#endif
 	
 	/* and write to stdout or so ... */
 	fwrite(buffer, buflen, 1, stdout);
