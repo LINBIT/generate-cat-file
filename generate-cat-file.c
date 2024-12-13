@@ -22,6 +22,7 @@
 #define SHA1_STR_LEN    SHA1_BYTE_LEN * 2
 #define UTF16_MAX_LEN   1000
 
+const char *const ERR_OOM		= "Out of memory";
 
 //linked-list-node
 struct list_node {
@@ -164,7 +165,7 @@ struct cache datacache = { 0 };
 
 void __attribute((noreturn)) fatal(const char *msg)
 {
-	fprintf(stderr, "%s", msg);
+	fputs(msg, stderr);
 	exit(1);
 }
 
@@ -442,6 +443,10 @@ size_t encode_plain_oid_with_header(char *oid, bool write)
 	if (this_node == NULL)
 	{
 		this_node = malloc(sizeof(struct list_node) + sizeof(struct node_data));
+		if (this_node == NULL)
+		{
+			fatal(ERR_OOM);
+		}
 		datacache.node->next = this_node;
 		this_node->next = NULL;
 		this_node->data = this_node + 1;
@@ -476,6 +481,10 @@ size_t encode_known_oid_with_header(struct oid_data *oid, bool write)
 		size_t head_length = encode_length_to_cache(data_length, oid_buf);
 		oid->length = data_length + head_length + 1;
 		oid->bytes = malloc(oid->length);
+		if (oid->bytes == NULL)
+		{
+			fatal(ERR_OOM);
+		}
 		oid->bytes[0] = OID_TAG;
 		memcpy(oid->bytes + 1, oid_buf, head_length);
 		memcpy(oid->bytes + 1 + head_length, oid_buf + 4, data_length);
@@ -568,6 +577,10 @@ size_t encode_tagged_data(char tag, void *s, size_t a_fn(void*, bool), bool writ
 	if (this_node == NULL)
 	{
 		this_node = malloc(sizeof(struct list_node) + sizeof(struct node_data));
+		if (this_node == NULL)
+		{
+			fatal(ERR_OOM);
+		}
 		datacache.node->next = this_node;
 		datacache.node = this_node;
 		this_node->next = NULL;
@@ -1018,7 +1031,7 @@ void create_binary_tree(struct pkcs7_toplevel *sdat)
 	/* create buffer of computed size */
 	buffer = malloc(bufsz);
 	if (buffer == NULL)
-		fatal("out of memory");
+		fatal(ERR_OOM);
 	/* reset cache node to root_node */
 	datacache.node = root_node;
 	/* write data to buffer */
@@ -1084,14 +1097,14 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct list_node
 		
 		this_file = malloc(sizeof(struct list_node) + sizeof(struct a_file));
 		if (this_file == NULL) {
-			fatal("out of memory");
+			fatal(ERR_OOM);
 		}
 		this_file->data = this_file + 1;
 		file_data = this_file->data;
 		
 		//fname_buf = malloc(fname_len + 1);
 		//if (fname_buf == NULL) {
-		//	fatal("out of memory");
+		//	fatal(ERR_OOM);
 		//}
 		
 		//memcpy(fname_buf, fname_p, fname_len);
@@ -1131,7 +1144,14 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct list_node
 	/*create new struct and chain it with previouse
 	//reverse order is based on observed cat files */ \
 	*hwid = malloc(sizeof(struct list_node) + sizeof(struct an_attribute_data)); \
-	if (*hwid == NULL) fatal("out of memory"); \
+	if (*hwid == NULL) \
+	{ \
+	    fatal(ERR_OOM); \
+	} \
+	if (*hwid == NULL) \
+	{ \
+		fatal(ERR_OOM); \
+	} \
 	(*hwid)->next = hwid_last; \
 	hwid_last = *hwid; \
 	hwid_last->data = hwid_last + 1; \
@@ -1139,6 +1159,10 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct list_node
 	\
 	/*create buffer, enough to store "HWID" + uint64 (4 + 20) */ \
 	hwid_data->name = malloc(0x18); \
+	if (hwid_data->name == NULL) \
+	{ \
+		fatal(ERR_OOM); \
+	} \
 	memcpy(hwid_data->name, "HWID", 4); \
 	/*increase hwid number and put it to hwid name */ \
 	++hwid_num; \
@@ -1233,7 +1257,7 @@ int main(int argc, char **argv)
 	
 	s.data.cert_trust_list.catalog_list_element = malloc(sizeof(struct catalog_list_element));
 	if (s.data.cert_trust_list.catalog_list_element == NULL) {
-		fatal("out of memory");
+		fatal(ERR_OOM);
 	}
 	
 	for (i=0;i<sizeof(a_hash);i++)
@@ -1274,6 +1298,10 @@ int main(int argc, char **argv)
 	
 	//create root node, that will be used in create_binary_tree()
 	root_node = calloc(1, sizeof(struct list_node) + sizeof(struct node_data));
+	if (root_node == NULL)
+	{
+		fatal(ERR_OOM);
+	}
 	root_node->data = root_node + 1;
 	datacache.node = root_node;
 	
