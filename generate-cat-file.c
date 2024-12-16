@@ -358,7 +358,7 @@ size_t encode_oid(char *oid, bool write)
 	size_t length;
 	int root, sroot, child;
 	
-	size_t(*oid_arc_handler)(int) = sizeof_oid_arc;
+	size_t (*oid_arc_handler)(int) = sizeof_oid_arc;
 	
 	
 	root = strtoul(oid, &next, 10);
