@@ -1322,4 +1322,6 @@ int main(int argc, char **argv)
 	/* and write to stdout or so ... */
 	fwrite(buffer, buflen, 1, stdout);
 	free(buffer); buffer = NULL;
+
+	return 0;
 }
