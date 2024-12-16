@@ -1061,7 +1061,7 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct list_node
 	struct a_file *file_data;
 	//char *fname_buf;
 	int fname_len;
-	bool is_pe;
+	bool is_pe = false;
 	
 	*file = NULL;
 	
@@ -1069,7 +1069,9 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct list_node
 	{
 		arg_p = f_args[f_count];
 		fname_p = arg_p;
-		for (; *arg_p && *arg_p != ':'; ++arg_p) ;
+		while (*arg_p != '\0' && *arg_p != ':') {
+			++arg_p;
+		}
 		if (!*arg_p) {
 			usage_and_exit();
 		}
@@ -1080,20 +1082,20 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct list_node
 		
 		hash_p = ++arg_p;
 		
-		for (; *arg_p && *arg_p != ':'; ++arg_p) ;
+		while (*arg_p != '\0' && *arg_p != ':') {
+			++arg_p;
+		}
 		if (arg_p - hash_p != SHA1_STR_LEN) {
 			fatal("unsupported hash, sha1 expected\n");
 		}
 		
 		if (*arg_p)
 		{
-			if (strcmp(":PE", arg_p)) //if not equals
+			if (strcmp(":PE", arg_p) != 0) //if not equals
 				usage_and_exit();
 			
 			is_pe = true;
 		}
-		else
-			is_pe = false;
 		
 		this_file = malloc(sizeof(struct list_node) + sizeof(struct a_file));
 		if (this_file == NULL) {
