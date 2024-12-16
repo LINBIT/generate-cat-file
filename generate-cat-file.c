@@ -39,25 +39,6 @@ struct oid_data {
 	size_t length;
 };
 
-// unused
-//struct octet_string {
-//	size_t len;
-//	void *data;
-//};
-//
-//struct bmp_string {
-//	size_t len;
-//	void *data;
-//};
-//
-//struct utc_time {
-//	char *date_time;  /* 221020135745Z with trailing '\0' */
-//};
-//
-//struct array_like_sequence {
-//	int nelem;
-//};
-
 struct null {
 };
 
@@ -78,7 +59,6 @@ struct an_attribute {
 
 struct a_file {
 	char *guid;	/* {C689AAB8-8E78-11D0-8C47-00C04FC295EE} */
-	//struct oid_data *member_info_oid; //file is a "hot" struct
 	char *sha1_str; //sha1 string
 	
 	struct an_attribute name_attribute;
@@ -86,7 +66,6 @@ struct a_file {
 	
 	bool is_pe;
 	
-	//char sha1_str[SHA1_STR_LEN + 1]; //sha1 string
 	char sha1_bytes[SHA1_BYTE_LEN];  //sha1 bytes in big endian order
 };
 
@@ -146,7 +125,6 @@ struct known_oids {
 
 struct node_data {
 	size_t length;
-	//int tag;	//mostly used for debugging purpose, but can be for tag match validation (so the length cache isn't so blind)
 };
 
 struct cache {
@@ -434,9 +412,6 @@ size_t encode_oid_to_cache(char *oid, char *buf, size_t buf_sz)
 //for any oids; byte form is calculated on each write; may be expensive with "hot" oids
 size_t encode_plain_oid_with_header(char *oid, bool write)
 {
-	//signature, predictable UB or out-of-style unrolling...
-	//encode_tagged_data(OID_TAG, oid, encode_oid, write);
-	
 	struct list_node *this_node = datacache.node->next;
 	struct node_data *node_data;
 	
@@ -451,7 +426,6 @@ size_t encode_plain_oid_with_header(char *oid, bool write)
 		this_node->next = NULL;
 		this_node->data = this_node + 1;
 		node_data = this_node->data;
-		//node_data->tag = OID_TAG;
 		node_data->length = encode_oid(oid, false);
 	}
 	
@@ -586,7 +560,6 @@ size_t encode_tagged_data(char tag, void *s, size_t a_fn(void*, bool), bool writ
 		this_node->next = NULL;
 		this_node->data = this_node + 1;
 		node_data = this_node->data;
-		//node_data->tag = tag;
 		node_data->length = a_fn(s, false);
 	}
 	
@@ -609,7 +582,6 @@ size_t encode_algo(void *p, bool write)
 {
 	size_t length = 0;
 	
-	//length += encode_known_oid_with_header(((struct algo*)p)->algo_oid, write);
 	length += encode_known_oid_with_header(&datacache.oids->algo_oid, write);
 	length += encode_null(write);
 	
@@ -771,13 +743,6 @@ size_t encode_file_attributes(void *p, bool write)
 	struct a_file *file = p;
 	size_t length = 0;
 	
-	/*
-	//initial order
-	length += encode_tagged_data(SEQUENCE_TAG, &file->name_attribute, encode_attribute, write);
-	length += encode_tagged_data(SEQUENCE_TAG, &file->os_attribute, encode_attribute, write);
-	length += encode_tagged_data(SEQUENCE_TAG, p, encode_spc_oid, write);
-	length += encode_tagged_data(SEQUENCE_TAG, p, encode_member_info_oid, write);
-	/*/
 	//Inf2Cat like order
 	length += encode_tagged_data(SEQUENCE_TAG, &file->os_attribute, encode_attribute, write);
 	length += encode_tagged_data(SEQUENCE_TAG, &file->name_attribute, encode_attribute, write);
@@ -824,7 +789,6 @@ size_t encode_catalog_list_member_oid(void *p, bool write)
 {
 	size_t length = 0;
 	
-	//length += encode_known_oid_with_header(((struct catalog_list_element*)p)->catalog_list_member_oid, write);
 	length += encode_known_oid_with_header(&datacache.oids->catalog_list_member_oid, write);
 	length += encode_null(write);
 	
@@ -833,7 +797,6 @@ size_t encode_catalog_list_member_oid(void *p, bool write)
 
 size_t encode_catalog_list_oid(void *p, bool write)
 {
-	//return encode_known_oid_with_header(((struct catalog_list_element*)p)->catalog_list_oid, write);
 	return encode_known_oid_with_header(&datacache.oids->catalog_list_oid, write);
 }
 
@@ -902,7 +865,6 @@ size_t encode_cert_trust_list(void *p, bool write)
 	size_t length = 0;
 	
 	length += encode_known_oid_with_header(cert->cert_trust_oid, write);
-	//length += encode_known_oid_with_header(&datacache.oids->cert_trust_oid, write);
 	length += encode_tagged_data(ARRAY_TAG, cert->catalog_list_element, encode_catalog_list_sequence, write);
 	
 	return length;
@@ -914,7 +876,6 @@ size_t encode_pkcs7_data(void *p, bool write)
 	size_t length = 0;
 	
 	length += encode_integer(data->an_int, write); //version?
-	//length += encode_tagged_data(SET_TAG, &data->algo, encode_algo_sequence, write);
 	length += encode_empty_set(write);
 	length += encode_tagged_data(SEQUENCE_TAG, &data->cert_trust_list, encode_cert_trust_list, write);
 	length += encode_empty_set(write);
@@ -933,8 +894,6 @@ size_t encode_pkcs7_toplevel(void *p, bool write)
 	size_t length = 0;
 	
 	length += encode_known_oid_with_header(sdat->signed_data_oid, write);
-	//length += encode_known_oid_with_header(&datacache.oids->signed_data_oid, write);
-	//length += encode_tagged_data(SEQUENCE_TAG, &sdat->data, encode_pkcs7_array, write);
 	length += encode_tagged_data(ARRAY_TAG, &sdat->data, encode_pkcs7_sequence, write);
 	
 	return length;
@@ -954,7 +913,6 @@ void free_allocated(struct pkcs7_toplevel *sdat)
 		next_node = this_node->next;
 		node_data = this_node->data;
 		node_data->length = 0;
-		//node_data->tag = 0;
 		this_node->data = NULL;
 		this_node->next = NULL;
 		free(this_node);
@@ -968,7 +926,6 @@ void free_allocated(struct pkcs7_toplevel *sdat)
 		this_node = next_node;
 		next_node = this_node->next;
 		file_data = this_node->data;
-		//free(file_data->name_attribute.data.value);
 		file_data->name_attribute.data.value = NULL;
 		this_node->data = NULL;
 		this_node->next = NULL;
@@ -1059,7 +1016,6 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct list_node
 	char *arg_p, *fname_p, *hash_p;
 	struct list_node *this_file;
 	struct a_file *file_data;
-	//char *fname_buf;
 	int fname_len;
 	bool is_pe = false;
 	
@@ -1104,16 +1060,9 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct list_node
 		this_file->data = this_file + 1;
 		file_data = this_file->data;
 		
-		//fname_buf = malloc(fname_len + 1);
-		//if (fname_buf == NULL) {
-		//	fatal(ERR_OOM);
-		//}
-		
-		//memcpy(fname_buf, fname_p, fname_len);
-		//fname_buf[fname_len] = '\0';
+
 		fname_p[fname_len] = '\0';
 		
-		//memcpy(file_data->sha1_str, hash_p, SHA1_STR_LEN);
 		file_data->sha1_str = hash_p;
 		file_data->sha1_str[SHA1_STR_LEN] = '\0';
 		for (int i = 0, j = 0; i < SHA1_BYTE_LEN; ++i, j += 2) {
@@ -1121,14 +1070,12 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct list_node
 		}
 		
 		file_data->name_attribute.data.name = "File";
-		//file_data->name_attribute.data.value = fname_buf;
 		file_data->name_attribute.data.value = fname_p;
 		file_data->name_attribute.encode_as_set = true;
 		file_data->os_attribute.data.name = "OSAttr";
 		file_data->os_attribute.data.value = os_attr;
 		file_data->os_attribute.encode_as_set = true;
 		
-		//file_data->member_info_oid.oid = "1.3.6.1.4.1.311.12.2.2";
 		file_data->is_pe = is_pe;
 		
 		if (file_data->is_pe) {
@@ -1220,11 +1167,6 @@ int main(int argc, char **argv)
 	struct list_node *hwids = NULL;
 	
 	/* initialize data structure */
-//	char a_hash[16] = {0xDD, 0x43, 0x67, 0xE3, 0x2B, 0xAB, 0xE1, 0x44, 0xB7, 0xCB, 0xEC, 0x31, 0xCE, 0xB9, 0xD5, 0xA6};
-//	char a_hash[16] = {0xEF, 0xAB, 0xFC, 0x01, 0x4F, 0xD8, 0x47, 0x42, 0xA0, 0x0B, 0x7C, 0x78, 0x8E, 0x6D, 0xD1, 0xC1};
-// this is correct:
-	// char a_hash[16] = {0x58, 0x72, 0xA5, 0x5B, 0xFE, 0xF3, 0xCD, 0x46, 0x91, 0x3C, 0xEF, 0x00, 0xC7, 0x7A, 0x97, 0x69};
-	// char a_hash[16] = {0x59, 0x72, 0xA5, 0x5B, 0xFE, 0xF3, 0xCD, 0x46, 0x91, 0x3C, 0xEF, 0x00, 0xC7, 0x7A, 0x97, 0x69};
 	char a_hash[16];
 	int i;
 	
@@ -1236,7 +1178,6 @@ int main(int argc, char **argv)
 	while ((c = getopt(argc, argv, "h:A:O:")) != -1) {
 		switch (c) {
 		case 'h':
-			//hardware_ids = strdup(optarg);
 			hardware_ids = optarg;
 			break;
 		case 'A':
@@ -1271,7 +1212,6 @@ int main(int argc, char **argv)
 	s.data.cert_trust_list.catalog_list_element->hwids = hwids;
 	s.data.cert_trust_list.catalog_list_element->files = files;
 	s.data.cert_trust_list.catalog_list_element->os_info.data.name = "OS";
-//	s.data.cert_trust_list.catalog_list_element->os_info.data.value = "XP_X86,Vista_X86,Vista_X64,7_X86,7_X64,8_X86,8_X64,6_3_X86,6_3_X64,10_X86,10_X64";
 	s.data.cert_trust_list.catalog_list_element->os_info.data.value = os_string;
 	s.data.cert_trust_list.catalog_list_element->os_info.encode_as_set = false;
 	
@@ -1316,8 +1256,6 @@ int main(int argc, char **argv)
 	free_allocated(&s);
 	root_node = NULL; files = NULL;
 	hwids = NULL;
-	//free(hardware_ids);
-	//hardware_ids = NULL;
 	
 	/* and write to stdout or so ... */
 	fwrite(buffer, buflen, 1, stdout);
