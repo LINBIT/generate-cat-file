@@ -232,7 +232,7 @@ size_t encode_integer(int i, bool write)
 	fatal("can't encode this integer\n");
 }
 
-size_t encode_length_to_cache(size_t len, char* buf)
+size_t encode_length_to_cache(size_t len, char *buf)
 {
 	if (len < 0x80) {
 		buf[0] = len;
@@ -356,7 +356,7 @@ size_t encode_oid(char *oid, bool write)
 	if (write)
 		oid_arc_handler = encode_oid_arc;
 	
-	length = oid_arc_handler(root*40 + sroot);
+	length = oid_arc_handler(root * 40 + sroot);
 	
 	while (*next != '\0') {
 		child = strtoul(next+1, &next, 10);
@@ -497,7 +497,7 @@ size_t encode_string_as_utf16(const char *s, bool write)
 		if (i < UTF16_MAX_LEN)
 		{
 			utf16[i++] = 0;
-			return encode_tagged_string(OCTET_STRING_TAG, i * sizeof(utf16[0]), (char*)utf16, true);
+			return encode_tagged_string(OCTET_STRING_TAG, i * sizeof(utf16[0]), (char *) utf16, true);
 		}
 	}
 	else
@@ -526,7 +526,7 @@ size_t encode_string_as_utf16_bmp(const char *s, bool write)
 		
 		if (s[i] == '\0')
 		{
-			return encode_tagged_string(BMP_STRING_TAG, i * sizeof(utf16[0]), (char*)utf16, true);
+			return encode_tagged_string(BMP_STRING_TAG, i * sizeof(utf16[0]), (char *) utf16, true);
 		}
 	}
 	else
@@ -543,7 +543,7 @@ size_t encode_string_as_utf16_bmp(const char *s, bool write)
 
 
 //generic data encoder
-size_t encode_tagged_data(char tag, void *s, size_t a_fn(void*, bool), bool write)
+size_t encode_tagged_data(char tag, void *s, size_t a_fn(void *, bool), bool write)
 {
 	struct list_node *this_node = datacache.node->next;
 	struct node_data *node_data;
@@ -948,7 +948,7 @@ void free_allocated(struct pkcs7_toplevel *sdat)
 		free(this_node);
 	}
 	
-	struct oid_data *one_oid = (struct oid_data*)datacache.oids;
+	struct oid_data *one_oid = (struct oid_data *) datacache.oids;
 	size_t oids_cnt = sizeof(struct known_oids) / sizeof(struct oid_data);
 	datacache.oids = NULL;
 	while (oids_cnt--)
@@ -1203,7 +1203,7 @@ int main(int argc, char **argv)
 		fatal(ERR_OOM);
 	}
 	
-	for (i=0;i<sizeof(a_hash);i++)
+	for (i = 0; i < sizeof(a_hash); i++)
 		a_hash[i] = i;
 	
 	s.data.an_int = 1;
