@@ -153,13 +153,13 @@ unset IFS
 
 if [ $DRY_RUN -eq 1 ]
 then
-	echo $EXEC_DIR/generate-cat-file "$CAT_GUID" "$GEN_TIME" -A $OS_ATTR -O $OS_STRING -h $HARDWARE_IDS ${sorted_images[*]}
+	echo $EXEC_DIR/generate-cat-file $CAT_GUID $GEN_TIME -A $OS_ATTR -O $OS_STRING -h $HARDWARE_IDS ${sorted_images[*]}
 	exit 0
 fi
 
 if [ $OUTPUT_CAT_FILE == '-' ]
 then
-	$EXEC_DIR/generate-cat-file "$CAT_GUID" "$GEN_TIME" -A $OS_ATTR -O $OS_STRING -h $HARDWARE_IDS ${sorted_images[*]}
+	$EXEC_DIR/generate-cat-file $CAT_GUID $GEN_TIME -A $OS_ATTR -O $OS_STRING -h $HARDWARE_IDS ${sorted_images[*]}
 else
-	$EXEC_DIR/generate-cat-file "$CAT_GUID" "$GEN_TIME" -A $OS_ATTR -O $OS_STRING -h $HARDWARE_IDS ${sorted_images[*]} > $OUTPUT_CAT_FILE
+	$EXEC_DIR/generate-cat-file $CAT_GUID $GEN_TIME -A $OS_ATTR -O $OS_STRING -h $HARDWARE_IDS ${sorted_images[*]} > $OUTPUT_CAT_FILE
 fi
