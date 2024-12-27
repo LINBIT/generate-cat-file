@@ -1361,7 +1361,6 @@ int main(int argc, char **argv)
 	
 	s.data.an_int = 1;
 	s.data.cert_trust_list.catalog_list_element->a_guid = a_guid;
-	s.data.cert_trust_list.catalog_list_element->a_hash = a_hash;
 	s.data.cert_trust_list.catalog_list_element->a_time = gen_time;
 	s.data.cert_trust_list.catalog_list_element->hwids = hwids;
 	s.data.cert_trust_list.catalog_list_element->files = files;
