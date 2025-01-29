@@ -135,12 +135,13 @@ struct known_oids {
 	struct oid_data spc_algo_oid;
 };
 
+static struct known_oids oids;
+
 struct node_data {
 	size_t length;
 };
 
 struct cache {
-	struct known_oids *oids;
 	//each calculation/write advance this to last visited leaf in current branch
 	//so, on write just after calc for the same branch, store current node before calc and restore it before write
 	struct list_node *node;
@@ -347,10 +348,9 @@ size_t encode_oid(char *oid, bool write)
 	char *next;
 	size_t length;
 	int root, sroot, child;
-	
+
 	size_t (*oid_arc_handler)(int) = sizeof_oid_arc;
-	
-	
+
 	root = strtoul(oid, &next, 10);
 	if (root == 0 && errno != 0) {
 		fatal("could not parse OID root arc\n");
@@ -367,9 +367,9 @@ size_t encode_oid(char *oid, bool write)
 	}
 	if (write)
 		oid_arc_handler = encode_oid_arc;
-	
+
 	length = oid_arc_handler(root * 40 + sroot);
-	
+
 	while (*next != '\0') {
 		child = strtoul(next+1, &next, 10);
 		if (child == 0 && errno != 0) {
@@ -388,8 +388,7 @@ size_t encode_oid_to_cache(char *oid, char *buf, size_t buf_sz)
 	size_t length;
 	char *next;
 	int root, sroot, child;
-	
-	
+
 	root = strtoul(oid, &next, 10);
 	if (root == 0 && errno != 0) {
 		fatal("could not parse OID root arc\n");
@@ -424,30 +423,12 @@ size_t encode_oid_to_cache(char *oid, char *buf, size_t buf_sz)
 //for any oids; byte form is calculated on each write; may be expensive with "hot" oids
 size_t encode_plain_oid_with_header(char *oid, bool write)
 {
-	struct list_node *this_node = datacache.node->next;
-	struct node_data *node_data;
-	
-	if (this_node == NULL)
-	{
-		this_node = malloc(sizeof(struct list_node) + sizeof(struct node_data));
-		if (this_node == NULL)
-		{
-			fatal(ERR_OOM);
-		}
-		datacache.node->next = this_node;
-		this_node->next = NULL;
-		this_node->data = this_node + 1;
-		node_data = this_node->data;
-		node_data->length = encode_oid(oid, false);
-	}
-	
-	node_data = this_node->data;
-	datacache.node = this_node;
-	size_t head_length = encode_tag_and_length(OID_TAG, node_data->length, write);
+	size_t oid_length = encode_oid(oid, false);
+	size_t head_length = encode_tag_and_length(OID_TAG, oid_length, write);
 	if (write)
 		return encode_oid(oid, true) + head_length;
-	
-	return node_data->length + head_length;
+
+	return oid_length + head_length;
 }
 
 //for known oids; necessary data is calculated on first request and cached inside the oid object for further usage
@@ -455,7 +436,7 @@ size_t encode_known_oid_with_header(struct oid_data *oid, bool write)
 {
 	if (oid->string == NULL || *oid->string == '\0')
 		fatal("the string value of the known OID must be not NULL nor empty string\n");
-	
+
 	if (oid->bytes == NULL)
 	{
 		// size of this buffer(128 + 4) is based on
@@ -475,10 +456,10 @@ size_t encode_known_oid_with_header(struct oid_data *oid, bool write)
 		memcpy(oid->bytes + 1, oid_buf, head_length);
 		memcpy(oid->bytes + 1 + head_length, oid_buf + 4, data_length);
 	}
-	
+
 	if (write)
 		return append_to_buffer(oid->length, oid->bytes);
-	
+
 	return oid->length;
 }
 
@@ -593,10 +574,10 @@ size_t encode_tagged_data(char tag, void *s, size_t a_fn(void *, bool), bool wri
 size_t encode_algo(void *p, bool write)
 {
 	size_t length = 0;
-	
-	length += encode_known_oid_with_header(&datacache.oids->algo_oid, write);
+
+	length += encode_known_oid_with_header(&oids.algo_oid, write);
 	length += encode_null(write);
-	
+
 	return length;
 }
 
@@ -632,7 +613,7 @@ size_t encode_attribute(void *p, bool write)
 	struct an_attribute *attr = p;
 	size_t length = 0;
 	
-	length += encode_known_oid_with_header(&datacache.oids->attribute_name_value_oid, write);
+	length += encode_known_oid_with_header(&oids.attribute_name_value_oid, write);
 	length += encode_tagged_data(attr->encode_as_set? SET_TAG : OCTET_STRING_TAG, p, encode_attribute_sequence, write);
 	
 	return length;
@@ -659,7 +640,7 @@ size_t encode_member_info_oid(void *p, bool write)
 {
 	size_t length = 0;
 	
-	length += encode_known_oid_with_header(&datacache.oids->member_info_oid, write);
+	length += encode_known_oid_with_header(&oids.member_info_oid, write);
 	length += encode_tagged_data(SET_TAG, p, encode_member_info_sequence, write);
 	
 	return length;
@@ -667,7 +648,7 @@ size_t encode_member_info_oid(void *p, bool write)
 
 size_t encode_spc_image_data(void *p, bool write)
 {
-	size_t length = encode_known_oid_with_header(&datacache.oids->spc_image_data_oid, write);
+	size_t length = encode_known_oid_with_header(&oids.spc_image_data_oid, write);
 	
 	//*
 	if (!write)
@@ -681,7 +662,7 @@ size_t encode_spc_image_data(void *p, bool write)
 
 size_t encode_spc_link(void *p, bool write)
 {
-	size_t length = encode_known_oid_with_header(&datacache.oids->spc_link_oid, write);
+	size_t length = encode_known_oid_with_header(&oids.spc_link_oid, write);
 	
 	if (!write)
 		return length + 0x20;
@@ -707,7 +688,7 @@ size_t encode_spc_algo_oid(void *p, bool write)
 {
 	size_t length = 0;
 	
-	length += encode_known_oid_with_header(&datacache.oids->spc_algo_oid, write);
+	length += encode_known_oid_with_header(&oids.spc_algo_oid, write);
 	length += encode_null(write);
 	
 	return length;
@@ -744,7 +725,7 @@ size_t encode_spc_oid(void *p, bool write)
 {
 	size_t length = 0;
 	
-	length += encode_known_oid_with_header(&datacache.oids->spc_oid, write);
+	length += encode_known_oid_with_header(&oids.spc_oid, write);
 	length += encode_tagged_data(SET_TAG, p, encode_spc_sequence, write);
 	
 	return length;
@@ -801,7 +782,7 @@ size_t encode_catalog_list_member_oid(void *p, bool write)
 {
 	size_t length = 0;
 	
-	length += encode_known_oid_with_header(&datacache.oids->catalog_list_member_oid, write);
+	length += encode_known_oid_with_header(&oids.catalog_list_member_oid, write);
 	length += encode_null(write);
 	
 	return length;
@@ -809,7 +790,7 @@ size_t encode_catalog_list_member_oid(void *p, bool write)
 
 size_t encode_catalog_list_oid(void *p, bool write)
 {
-	return encode_known_oid_with_header(&datacache.oids->catalog_list_oid, write);
+	return encode_known_oid_with_header(&oids.catalog_list_oid, write);
 }
 
 //specialized version of encode_attribute()
@@ -817,7 +798,7 @@ size_t encode_one_hwid(void *p, bool write)
 {
 	size_t length = 0;
 
-	length += encode_known_oid_with_header(&datacache.oids->attribute_name_value_oid, write);
+	length += encode_known_oid_with_header(&oids.attribute_name_value_oid, write);
 	length += encode_tagged_data(OCTET_STRING_TAG, p, encode_attribute_sequence, write);
 
 	return length;
@@ -929,7 +910,7 @@ void free_allocated(struct pkcs7_toplevel *sdat)
 		this_node->next = NULL;
 		free(this_node);
 	}
-	
+
 	struct a_file *file_data;
 	next_node = sdat->data.cert_trust_list.catalog_list_element->files;
 	sdat->data.cert_trust_list.catalog_list_element->files = NULL;
@@ -943,7 +924,7 @@ void free_allocated(struct pkcs7_toplevel *sdat)
 		this_node->next = NULL;
 		free(this_node);
 	}
-	
+
 	struct an_attribute_data *hwid_data;
 	next_node = sdat->data.cert_trust_list.catalog_list_element->hwids;
 	sdat->data.cert_trust_list.catalog_list_element->hwids = NULL;
@@ -959,17 +940,7 @@ void free_allocated(struct pkcs7_toplevel *sdat)
 		this_node->next = NULL;
 		free(this_node);
 	}
-	
-	struct oid_data *one_oid = (struct oid_data *) datacache.oids;
-	size_t oids_cnt = sizeof(struct known_oids) / sizeof(struct oid_data);
-	datacache.oids = NULL;
-	while (oids_cnt--)
-	{
-		free(one_oid->bytes);
-		one_oid->bytes = NULL;
-		one_oid->length = 0;
-		++one_oid;
-	}
+
 	free(sdat->data.cert_trust_list.catalog_list_element->a_time);
 	sdat->data.cert_trust_list.catalog_list_element->a_time = NULL;
 
@@ -1271,7 +1242,6 @@ int main(int argc, char **argv)
 	
 	
 	struct pkcs7_toplevel s = { 0 };
-	struct known_oids oids = { 0 };
 	
 	struct list_node *root_node = NULL;
 	struct list_node *files = NULL;
@@ -1341,7 +1311,6 @@ int main(int argc, char **argv)
 	s.data.cert_trust_list.catalog_list_element->os_info.encode_as_set = false;
 	
 	/* init OIDs cache, actual data will be computed on first access per OID */
-	datacache.oids = &oids;
 	oids.signed_data_oid.string             = "1.2.840.113549.1.7.2";
 	//{joint-iso-itu-t(2) country(16) us(840) organization(1) gov(101) csor(3) nistAlgorithms(4) hashAlgs(2) sha256(1)}
 	oids.algo_oid.string                    = "2.16.840.1.101.3.4.2.1";
