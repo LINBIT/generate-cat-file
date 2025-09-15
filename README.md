@@ -12,6 +12,10 @@ does not implement this particular feature). So I wrote
 a small C program from scratch that creates the ``.cat``
 file.
 
+Note that this project is targeted at non-Windows platforms.
+If you have to use Windows, use inf2cat (which comes, for
+example, with EWDK) instead.
+
 ## Usage
 
 You would normally use the utility via the gencat.sh
