@@ -65,7 +65,7 @@ function usage_and_exit() {
 EXEC_DIR=$( dirname $0 )
 
 OUTPUT_CAT_FILE=-
-HARDWARE_ID=windrbd
+HARDWARE_IDS=windrbd
 OS_STRING=7X64,8X64,_v100_X64
 OS_ATTR=2:6.1,2:6.2,2:10.0
 GEN_TIME="-T 230823140713Z"

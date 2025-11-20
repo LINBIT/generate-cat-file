@@ -1088,7 +1088,7 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct list_node
 	struct list_node *this_file;
 	struct a_file *file_data;
 	int fname_len;
-	bool is_pe = false;
+	bool is_pe;
 	
 	*file = NULL;
 	
@@ -1123,6 +1123,8 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct list_node
 			
 			is_pe = true;
 		}
+		else
+			is_pe = false;
 		
 		this_file = malloc(sizeof(struct list_node) + sizeof(struct a_file));
 		if (this_file == NULL) {
@@ -1166,10 +1168,6 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct list_node
 	*hwid = malloc(sizeof(struct list_node) + sizeof(struct an_attribute_data)); \
 	if (*hwid == NULL) \
 	{ \
-	    fatal(ERR_OOM); \
-	} \
-	if (*hwid == NULL) \
-	{ \
 		fatal(ERR_OOM); \
 	} \
 	(*hwid)->next = hwid_last; \
@@ -1191,7 +1189,7 @@ void parse_file_args(char **f_args, int f_count, char *os_attr, struct list_node
 	hwid_data->value = hwid_begin; \
 }
 
-//note: it does modify hwids content (replace comma with null) and creates references to its particular parts
+//note: it does modify hwids content (replace each comma, that comes 1st after hwid, with null) and creates references to its particular parts
 int parse_hwids_arg(char *hwids, struct list_node **hwid)
 {
 	struct list_node *hwid_last = NULL;
@@ -1201,13 +1199,17 @@ int parse_hwids_arg(char *hwids, struct list_node **hwid)
 	
 	while (*hwids)
 	{
-		if (*hwids == ',' && hwids > hwid_begin)
+		if (*hwids == ',')
 		{
-			FUNC_CREATE_HWID_NODE();
-			
-			//"cut" string to current hwid end
-			*hwids = '\0';
-			//update current position and move position of current hwid begin to it
+			//check if delimiter is NOT immediately after another one (empty entries must be skipped, delimiter is not allowed in the value)
+			if (hwids > hwid_begin)
+			{
+				FUNC_CREATE_HWID_NODE();
+				
+				//"cut" string to current hwid end
+				*hwids = '\0';
+			}
+			//update current position AND move position of current hwid begin to it
 			hwid_begin = ++hwids;
 		}
 		else
